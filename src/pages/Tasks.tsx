@@ -1,14 +1,18 @@
 import { useState, useEffect } from 'react';
-import { ListChecks, Twitter, Instagram, Send, PlayCircle, Clock } from 'lucide-react';
+import { ListChecks, Twitter, Instagram, Send, PlayCircle, Clock, Youtube, Facebook, MessageCircle, Video } from 'lucide-react';
 import { motion } from 'motion/react';
 
 export default function Tasks() {
   const [adCooldown, setAdCooldown] = useState(0);
 
   const tasks = [
-    { id: '1', title: 'Join Telegram Channel', icon: Send, reward: 0.001, color: 'text-blue-400' },
-    { id: '2', title: 'Follow on X (Twitter)', icon: Twitter, reward: 0.001, color: 'text-white' },
-    { id: '3', title: 'Follow on Instagram', icon: Instagram, reward: 0.001, color: 'text-pink-500' },
+    { id: '1', title: 'Join Telegram Channel', icon: Send, reward: 0.001, color: 'text-blue-400', url: 'https://t.me/XTon1Bet' },
+    { id: '2', title: 'Follow on X (Twitter)', icon: Twitter, reward: 0.001, color: 'text-white', url: 'https://x.com/XTonBet' },
+    { id: '3', title: 'Follow on Instagram', icon: Instagram, reward: 0.001, color: 'text-pink-500', url: 'https://www.instagram.com/xtonbet?igsh=MWFsODd2N3Iwa240dA==' },
+    { id: '4', title: 'Subscribe on YouTube', icon: Youtube, reward: 0.001, color: 'text-red-500', url: 'https://www.youtube.com/@XTonBet' },
+    { id: '5', title: 'Like Facebook Page', icon: Facebook, reward: 0.001, color: 'text-blue-600', url: 'https://www.facebook.com/share/1Dwui6vWTp/' },
+    { id: '6', title: 'Join WhatsApp Channel', icon: MessageCircle, reward: 0.001, color: 'text-green-500', url: 'https://whatsapp.com/channel/0029VbCU6G42v1ImrlDyOd2F' },
+    { id: '7', title: 'Follow on TikTok', icon: Video, reward: 0.001, color: 'text-cyan-400', url: 'https://www.tiktok.com/@ton.bet?_r=1&_t=ZS-95uukG9YCzS' },
   ];
 
   useEffect(() => {
@@ -71,9 +75,14 @@ export default function Tasks() {
                 <span className="text-[10px] text-blue-500 font-bold">+{task.reward} TON</span>
               </div>
             </div>
-            <button className="bg-white text-black text-[10px] font-black px-4 py-2 rounded-lg active:scale-95 transition-transform uppercase">
+            <a 
+              href={task.url} 
+              target="_blank" 
+              rel="no-referrer"
+              className="bg-white text-black text-[10px] font-black px-4 py-2 rounded-lg active:scale-95 transition-transform uppercase inline-block"
+            >
               Start
-            </button>
+            </a>
           </div>
         ))}
       </section>

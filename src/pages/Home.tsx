@@ -1,6 +1,6 @@
 import { motion } from 'motion/react';
 import { WalletContainer } from '../components/Navbar';
-import { Trophy, Gift, Target, ArrowRight, Zap, TrendingUp, Users } from 'lucide-react';
+import { Trophy, Gift, Target, ArrowRight, Zap, TrendingUp, Users, User } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { cn } from '../lib/utils';
 
@@ -36,19 +36,33 @@ export default function Home() {
   return (
     <div className="px-6 pt-8 pb-32 max-w-md mx-auto min-h-screen">
       <header className="mb-8 px-2 flex justify-between items-end">
-        <div>
-          <motion.h1 
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="text-3xl font-black tracking-tight"
-          >
-            Ton<span className="text-ton-blue">Bet</span>
-          </motion.h1>
-          <p className="text-slate-500 text-[10px] uppercase font-bold tracking-widest mt-1">Premium TMA Platform</p>
+        <div className="flex items-center gap-3">
+          <img 
+            src="https://ik.imagekit.io/trya1gkkd/photo_2026-04-28_14-35-58.jpg" 
+            alt="TonBet Logo" 
+            className="w-12 h-12 rounded-2xl shadow-lg border border-white/10"
+          />
+          <div>
+            <motion.h1 
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="text-3xl font-black tracking-tight"
+            >
+              Ton<span className="text-ton-blue">Bet</span>
+            </motion.h1>
+            <p className="text-slate-500 text-[10px] uppercase font-bold tracking-widest mt-0.5">Premium TMA Platform</p>
+          </div>
         </div>
-        <div className="flex gap-1.5 opacity-40 mb-2">
-          <div className="w-4 h-4 rounded-full border border-white/40"></div>
-          <div className="w-4 h-4 rounded-full border border-white/40"></div>
+        <div className="flex items-center gap-3">
+          <Link to="/profile">
+            <div className="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-slate-400 hover:text-white transition-colors">
+              <User size={20} />
+            </div>
+          </Link>
+          <div className="flex gap-1.5 opacity-40 mb-2">
+            <div className="w-4 h-4 rounded-full border border-white/40"></div>
+            <div className="w-4 h-4 rounded-full border border-white/40"></div>
+          </div>
         </div>
       </header>
 

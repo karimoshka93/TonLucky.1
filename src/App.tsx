@@ -8,6 +8,8 @@ import Predictions from './pages/Predictions';
 import Tasks from './pages/Tasks';
 import Admin from './pages/Admin';
 import Referral from './pages/Referral';
+import Profile from './pages/Profile';
+import About from './pages/About';
 
 const manifestUrl = import.meta.env.VITE_TON_MANIFEST_URL || 'https://tonbet.app/tonconnect-manifest.json';
 
@@ -23,6 +25,8 @@ export default function App() {
             <Route path="/predictions" element={<Predictions />} />
             <Route path="/tasks" element={<Tasks />} />
             <Route path="/referral" element={<Referral />} />
+            <Route path="/profile" element={<Profile />} />
+            <Route path="/about" element={<About />} />
             <Route path="/admin" element={<Admin />} />
           </Routes>
           <Navbar />

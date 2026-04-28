@@ -4,13 +4,82 @@ import { Trophy, Users, Info, Ticket } from 'lucide-react';
 import { LOTTERY_TIERS, formatTon, cn } from '../lib/utils';
 import { WalletContainer } from '../components/Navbar';
 import { useTonConnectUI } from '@tonconnect/ui-react';
+import { supabase } from '../lib/supabase';
 
 export default function Lottery() {
   const [tonConnectUI] = useTonConnectUI();
   const [loading, setLoading] = useState<string | null>(null);
 
   const buyTicket = async (tierId: string, cost: number) => {
-    // ... function logic remains unchanged ...
+    if (!tonConnectUI.connected) {
+      alert('Please connect your wallet first');
+      return;
+    }
+
+    setLoading(tierId);
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('User not found');
+
+      // Try to pay with internal balance first via API
+      const response = await fetch('/api/games/buy-ticket', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.id,
+          roomId: tierId,
+          cost: cost
+        })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        alert(`Success! Ticket #${result.ticket.ticket_number} purchased.`);
+        // Reload or update UI state here if needed
+      } else {
+        // If insufficient balance, offer to pay via TON transaction
+        if (result.error === 'Insufficient balance') {
+          const confirmDirect = confirm('Insufficient in-app balance. Pay 1.0 TON directly?');
+          if (confirmDirect) {
+            const transaction = {
+              validUntil: Math.floor(Date.now() / 1000) + 60,
+              messages: [{ 
+                address: "UQCWOWCOQULzFdZttBaH3iUJyue51OEYvRhbCaitE4ktTxO4", 
+                amount: (cost * 1000000000).toString() 
+              }],
+            };
+
+            const txResult = await tonConnectUI.sendTransaction(transaction);
+            
+            // Verify on backend
+            const vResponse = await fetch('/api/verify-transaction', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                hash: txResult.boc, // Simplified hash for demo
+                amount: cost,
+                type: 'lottery_ticket',
+                userId: user.id
+              })
+            });
+            
+            const vResult = await vResponse.json();
+            if (vResult.success) {
+              alert('Transaction verified! Ticket purchased.');
+            }
+          }
+        } else {
+          alert(`Error: ${result.error}`);
+        }
+      }
+    } catch (e) {
+      console.error(e);
+      alert('Operation failed');
+    } finally {
+      setLoading(null);
+    }
   };
 
   return (
