@@ -77,6 +77,11 @@ export default function Profile() {
           .single();
         
         if (pData) setProfile(pData);
+        else {
+          // If profile doesn't exist, it might be a new user from sync
+          // We can try to wait a bit or create it if needed
+          // But usually profiles are created by DB triggers
+        }
 
         // Fetch Transactions
         const { data: tData } = await supabase
@@ -119,6 +124,19 @@ export default function Profile() {
     }
 
     getInitialData();
+
+    // Listen for auth state changes (crucial for wallet sync)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
+        setLoading(true);
+        getInitialData();
+      } else if (event === 'SIGNED_OUT') {
+        setUser(null);
+        setProfile(null);
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   const handleWithdraw = async (e: FormEvent) => {

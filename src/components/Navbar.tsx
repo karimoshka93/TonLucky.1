@@ -1,6 +1,6 @@
 import { TonConnectButton } from '@tonconnect/ui-react';
 import { NavLink } from 'react-router-dom';
-import { Home, Trophy, Gift, Target, ListChecks, Users, ShieldAlert } from 'lucide-react';
+import { Home, Trophy, Gift, Target, ListChecks, Users, ShieldAlert, History } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 export default function Navbar() {
@@ -9,6 +9,7 @@ export default function Navbar() {
     { to: '/lottery', icon: Trophy, label: 'Lottery' },
     { to: '/boxes', icon: Gift, label: 'Boxes' },
     { to: '/predictions', icon: Target, label: 'Bets' },
+    { to: '/winners', icon: History, label: 'Winners' },
     { to: '/tasks', icon: ListChecks, label: 'Tasks' },
     { to: '/referral', icon: Users, label: 'Ref' },
   ];
