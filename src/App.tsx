@@ -11,7 +11,7 @@ import Referral from './pages/Referral';
 import Profile from './pages/Profile';
 import About from './pages/About';
 
-const manifestUrl = import.meta.env.VITE_TON_MANIFEST_URL || 'https://tonbet.app/tonconnect-manifest.json';
+const manifestUrl = import.meta.env.VITE_TON_MANIFEST_URL || 'https://tonbet-sand.vercel.app/tonconnect-manifest.json';
 
 export default function App() {
   return (
