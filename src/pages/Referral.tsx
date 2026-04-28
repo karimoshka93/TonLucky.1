@@ -22,18 +22,27 @@ export default function Referral() {
   }, [address]);
 
   const fetchReferralStats = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
     // Fetch referrals count and total earned
-    // This assumes a 'profiles' table with 'referred_by' column
     const { data, count, error } = await supabase
       .from('profiles')
       .select('*', { count: 'exact' })
-      .eq('referred_by', address);
+      .eq('referred_by', user.id);
 
     if (data) {
+      // Find my own profile for earnings
+      const { data: myProfile } = await supabase
+        .from('profiles')
+        .select('total_earned_referral')
+        .eq('id', user.id)
+        .single();
+
       setReferrals(data);
       setStats({
         count: count || 0,
-        earned: 0 // In a real app, you'd sum up 'referral_earnings'
+        earned: Number(myProfile?.total_earned_referral || 0)
       });
     }
   };

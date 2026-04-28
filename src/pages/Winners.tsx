@@ -36,14 +36,24 @@ export default function Winners() {
   useEffect(() => {
     async function fetchRealWinners() {
       const { data, error } = await supabase
-        .from('lottery_winners')
-        .select('*')
+        .from('lottery_rooms')
+        .select('*, profiles(username, wallet_address)')
+        .eq('status', 'completed')
         .order('created_at', { ascending: false })
         .limit(30);
 
       if (data && data.length > 0) {
+        const mappedWinners: Winner[] = data.map((room: any) => ({
+          username: room.profiles?.username || 'Winner',
+          wallet_address: room.profiles?.wallet_address || 'UQ...',
+          amount: room.prize_pool,
+          room_type: room.name,
+          won_at: room.created_at,
+          isFake: false
+        }));
+        
         // Merge real winners with fake ones if real count is low
-        setWinners([...data, ...FAKE_WINNERS].slice(0, 30));
+        setWinners([...mappedWinners, ...FAKE_WINNERS].slice(0, 30));
       }
     }
     fetchRealWinners();

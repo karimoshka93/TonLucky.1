@@ -15,30 +15,58 @@ export default function Lottery() {
     fetchRooms();
     const subscription = supabase
       .channel('rooms-update')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, fetchRooms)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'lottery_rooms' }, fetchRooms)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'tickets' }, fetchRooms)
       .subscribe();
 
     return () => { subscription.unsubscribe(); };
   }, []);
 
   const fetchRooms = async () => {
-    const { data, error } = await supabase
-      .from('rooms')
+    // Fetch all active rooms
+    const { data: roomsData, error: roomsError } = await supabase
+      .from('lottery_rooms')
       .select('*')
-      .eq('status', 'open')
-      .order('tier', { ascending: true });
+      .eq('status', 'active')
+      .order('entry_fee', { ascending: true });
     
-    if (data) {
-      setRooms(data);
+    if (roomsError) {
+      console.error('Error fetching rooms:', roomsError);
+      return;
+    }
+
+    if (roomsData && roomsData.length > 0) {
+      // For each room, fetch the ticket count
+      const roomsWithCounts = await Promise.all(roomsData.map(async (room, idx) => {
+        const { count, error: countError } = await supabase
+          .from('tickets')
+          .select('*', { count: 'exact', head: true })
+          .eq('room_id', room.id);
+        
+        return {
+          id: room.id,
+          tier: idx + 1,
+          name: room.name,
+          participants_count: count || 0,
+          max_tickets: room.max_tickets || [20, 10, 10][idx] || 10,
+          prize_pool: room.prize_pool,
+          status: room.status,
+          entry_fee: room.entry_fee
+        };
+      }));
+
+      setRooms(roomsWithCounts);
     } else {
-      // Fallback if no rooms in DB
+      // Fallback
       setRooms(LOTTERY_TIERS.map((t, idx) => ({
         id: t.id,
         tier: idx + 1,
+        name: t.cost === 5 ? 'Golden Tier' : t.cost === 1 ? 'Pro Tier' : 'Standard Tier',
         participants_count: 0,
-        max_participants: t.participants,
+        max_tickets: t.participants,
         prize_pool: t.prize,
-        status: 'open'
+        status: 'open',
+        entry_fee: t.cost
       })));
     }
   };
@@ -68,16 +96,18 @@ export default function Lottery() {
       
       // Save ticket purchase to DB
       const { data, error } = await supabase
-        .from('lottery_tickets')
+        .from('tickets')
         .insert({
           user_id: user.id,
-          room_id: roomId,
-          amount_paid: cost,
-          transaction_hash: txResult.boc
+          room_id: roomId
         });
       
       if (!error) {
         alert('Success! Your ticket has been registered.');
+        
+        // Check if room is now full and trigger draw
+        await checkAndTriggerDraw(roomId);
+        
         fetchRooms();
       } else {
         throw error;
@@ -87,6 +117,69 @@ export default function Lottery() {
       alert('Transaction failed: User canceled or insufficient balance.');
     } finally {
       setLoading(null);
+    }
+  };
+
+  const checkAndTriggerDraw = async (roomId: string) => {
+    // Fetch room and ticket count
+    const { data: room } = await supabase
+      .from('lottery_rooms')
+      .select('*')
+      .eq('id', roomId)
+      .single();
+    
+    if (!room || room.status !== 'active') return;
+
+    const { count, data: tickets } = await supabase
+      .from('tickets')
+      .select('*', { count: 'exact' })
+      .eq('room_id', roomId);
+    
+    const max = room.max_tickets || 10;
+    if (count !== null && count >= max && tickets) {
+      console.log('Room full! Triggering draw for:', roomId);
+      
+      // Randomly pick a winner
+      const winnerTicket = tickets[Math.floor(Math.random() * tickets.length)];
+      
+      // Update room status and winner
+      await supabase
+        .from('lottery_rooms')
+        .update({ 
+          status: 'completed', 
+          winner_id: winnerTicket.user_id 
+        })
+        .eq('id', roomId);
+      
+      // Get winner details
+      const { data: winnerProfile } = await supabase
+        .from('profiles')
+        .select('username, wallet_address')
+        .eq('id', winnerTicket.user_id)
+        .single();
+
+      if (winnerProfile) {
+        await supabase
+          .from('transactions')
+          .insert({
+            user_id: winnerTicket.user_id,
+            type: 'game_win',
+            amount: room.prize_pool,
+            description: `Won ${room.name} lottery!`
+          });
+          
+        // Re-seed a new room
+        await supabase
+          .from('lottery_rooms')
+          .insert({
+            name: room.name,
+            tier: room.tier,
+            entry_fee: room.entry_fee,
+            prize_pool: room.prize_pool,
+            max_tickets: room.max_tickets,
+            status: 'active'
+          });
+      }
     }
   };
 
@@ -125,7 +218,7 @@ export default function Lottery() {
 
       <div className="space-y-4">
         {rooms.map((room, idx) => {
-          const progress = (room.participants_count / room.max_participants) * 100;
+          const progress = (room.participants_count / room.max_tickets) * 100;
           return (
             <motion.div
               key={room.id}
@@ -134,10 +227,10 @@ export default function Lottery() {
               transition={{ delay: idx * 0.05 }}
               className={cn(
                 "p-6 rounded-[32px] relative overflow-hidden border",
-                room.tier === 3 ? "bg-gradient-to-br from-[#1e222b] to-[#14161c] border-white/10 shadow-xl" : "bg-[#161920] border-white/5"
+                room.tier === 'GOLDEN' ? "bg-gradient-to-br from-[#1e222b] to-[#14161c] border-white/10 shadow-xl" : "bg-[#161920] border-white/5"
               )}
             >
-              {room.tier === 3 && (
+              {room.tier === 'GOLDEN' && (
                 <div className="absolute top-4 right-4 bg-orange-500/20 text-orange-400 text-[8px] font-black px-2 py-1 rounded-md uppercase tracking-widest">High Stakes</div>
               )}
               
@@ -145,7 +238,7 @@ export default function Lottery() {
                 <div className="flex justify-between items-start">
                   <div>
                     <p className="text-slate-500 text-[10px] font-black uppercase tracking-wider mb-1">
-                      {room.tier === 1 ? 'Standard Tier' : room.tier === 2 ? 'Pro Tier' : 'Golden Tier'}
+                      {room.name}
                     </p>
                     <h3 className="text-2xl font-black text-white italic">Win {room.prize_pool}.0 <span className="text-ton-blue">TON</span></h3>
                   </div>
@@ -154,7 +247,7 @@ export default function Lottery() {
                 <div className="space-y-2">
                   <div className="flex justify-between items-end text-[10px] font-black uppercase tracking-wider">
                     <span className="text-slate-500">Progress</span>
-                    <span className="text-white">{room.participants_count} / {room.max_participants} Entries</span>
+                    <span className="text-white">{room.participants_count} / {room.max_tickets} Entries</span>
                   </div>
                   <div className="w-full bg-black/40 h-2 rounded-full overflow-hidden">
                     <motion.div 

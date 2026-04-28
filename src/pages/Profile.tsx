@@ -1,7 +1,7 @@
 import { useState, useEffect, FormEvent } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
-  User, 
+  User as UserIcon, 
   Wallet, 
   History, 
   Ticket, 
@@ -14,11 +14,13 @@ import {
   Mail,
   ShieldCheck,
   AlertCircle,
-  Info
+  Info,
+  RefreshCw
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { Link } from 'react-router-dom';
 import { cn } from '../lib/utils';
+import { useTonWallet } from '@tonconnect/ui-react';
 
 interface ProfileData {
   id: string;
@@ -50,6 +52,7 @@ interface BoxLog {
 }
 
 export default function Profile() {
+  const wallet = useTonWallet();
   const [user, setUser] = useState<any>(null);
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -63,69 +66,64 @@ export default function Profile() {
   const [showWithdraw, setShowWithdraw] = useState(false);
   const [withdrawStatus, setWithdrawStatus] = useState<{ type: 'success' | 'error', msg: string } | null>(null);
 
-  useEffect(() => {
-    async function getInitialData() {
-      const { data: { user } } = await supabase.auth.getUser();
-      setUser(user);
+  const getInitialData = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    setUser(user);
 
-      if (user) {
-        // Fetch Profile
-        const { data: pData } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', user.id)
-          .single();
-        
-        if (pData) setProfile(pData);
-        else {
-          // If profile doesn't exist, it might be a new user from sync
-          // We can try to wait a bit or create it if needed
-          // But usually profiles are created by DB triggers
-        }
+    if (user) {
+      // Fetch Profile
+      const { data: pData } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+      
+      if (pData) setProfile(pData);
 
-        // Fetch Transactions
-        const { data: tData } = await supabase
-          .from('transactions')
-          .select('*')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false })
-          .limit(10);
-        
-        if (tData) setTransactions(tData);
+      // Fetch Transactions
+      const { data: tData } = await supabase
+        .from('transactions')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(10);
+      
+      if (tData) setTransactions(tData);
 
-        // Fetch Tickets (simplified join-like)
-        const { data: ticketData } = await supabase
-          .from('tickets')
-          .select('*, lottery_rooms(room_name)')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false })
-          .limit(10);
-        
-        if (ticketData) {
-          setTickets(ticketData.map((t: any) => ({
-            id: t.id,
-            room_name: t.lottery_rooms?.room_name || 'Unknown Room',
-            ticket_number: t.ticket_number,
-            created_at: t.created_at
-          })));
-        }
-
-        // Fetch Box Logs
-        const { data: bData } = await supabase
-          .from('mystery_box_logs')
-          .select('*')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false })
-          .limit(10);
-        
-        if (bData) setBoxLogs(bData);
+      // Fetch Tickets
+      const { data: ticketData } = await supabase
+        .from('tickets')
+        .select('*, lottery_rooms(room_name)')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(10);
+      
+      if (ticketData) {
+        setTickets(ticketData.map((t: any) => ({
+          id: t.id,
+          room_name: t.lottery_rooms?.room_name || 'Unknown Room',
+          ticket_number: t.ticket_number,
+          created_at: t.created_at
+        })));
       }
-      setLoading(false);
-    }
 
+      // Fetch Box Logs
+      const { data: bData } = await supabase
+        .from('mystery_box_logs')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(10);
+      
+      if (bData) setBoxLogs(bData);
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => {
     getInitialData();
 
-    // Listen for auth state changes (crucial for wallet sync)
+    // Listen for auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
         setLoading(true);
@@ -133,6 +131,7 @@ export default function Profile() {
       } else if (event === 'SIGNED_OUT') {
         setUser(null);
         setProfile(null);
+        setLoading(false);
       }
     });
 
@@ -169,8 +168,25 @@ export default function Profile() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="w-8 h-8 border-4 border-ton-blue border-t-transparent rounded-full animate-spin"></div>
+      <div className="flex flex-col items-center justify-center min-h-screen gap-4">
+        <RefreshCw size={32} className="text-ton-blue animate-spin" />
+        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Loading profile data</p>
+      </div>
+    );
+  }
+
+  // If wallet is connected but user is not logged in to supabase
+  if (wallet && !user) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen px-6 text-center gap-6">
+        <RefreshCw size={48} className="text-ton-blue animate-spin" />
+        <div>
+          <h2 className="text-2xl font-black mb-2">Syncing Wallet</h2>
+          <p className="text-slate-400 text-sm">Please wait while we secure your session...</p>
+        </div>
+        <div className="bg-white/5 p-4 rounded-2xl border border-white/10 w-full max-w-[280px]">
+          <p className="text-[10px] font-mono text-slate-500 break-all">{wallet.account.address}</p>
+        </div>
       </div>
     );
   }
@@ -178,9 +194,16 @@ export default function Profile() {
   if (!user) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen px-6 text-center">
-        <AlertCircle size={48} className="text-yellow-500 mb-4" />
-        <h2 className="text-2xl font-black mb-2">Login Required</h2>
-        <p className="text-slate-400 mb-6">Please connect your wallet to view your profile.</p>
+        <div className="w-20 h-20 bg-amber-500/10 border border-amber-500/20 rounded-3xl flex items-center justify-center mb-6 shadow-xl shadow-amber-500/5">
+          <AlertCircle size={40} className="text-amber-500" />
+        </div>
+        <h2 className="text-2xl font-black mb-2 italic">Login Required</h2>
+        <p className="text-slate-400 text-sm max-w-[240px] leading-relaxed mb-8">
+          Please connect your wallet through the <span className="text-ton-blue font-bold">Connect Wallet</span> button to view your profile and rewards.
+        </p>
+        <Link to="/" className="bg-[#161920] border border-white/5 py-4 px-8 rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-white hover:text-black transition-all">
+          Go to Home
+        </Link>
       </div>
     );
   }
@@ -188,34 +211,39 @@ export default function Profile() {
   return (
     <div className="px-6 pt-8 pb-32 max-w-md mx-auto min-h-screen">
       {/* Profile Header */}
-      <div className="bg-gradient-to-br from-[#1e222b] to-[#14161c] border border-white/10 rounded-[32px] p-6 mb-6 shadow-xl">
-        <div className="flex items-center gap-4 mb-6">
+      <div className="bg-gradient-to-br from-[#1e222b] to-[#14161c] border border-white/10 rounded-[32px] p-6 mb-6 shadow-xl relative overflow-hidden group">
+        <div className="absolute -top-10 -right-10 w-32 h-32 bg-ton-blue/10 rounded-full blur-3xl group-hover:bg-ton-blue/20 transition-all duration-700" />
+        
+        <div className="flex items-center gap-4 mb-6 relative z-10">
           <div className="w-16 h-16 rounded-2xl bg-ton-blue/20 flex items-center justify-center text-ton-blue border border-ton-blue/30 shadow-lg shadow-ton-blue/10">
-            <User size={32} />
+            <UserIcon size={32} />
           </div>
           <div>
-            <h2 className="text-xl font-black">
-              {profile?.username || 'Player'}
+            <h2 className="text-xl font-black italic">
+              {profile?.username || 'Premium Player'}
             </h2>
-            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">
-              ID: {user.id.slice(0, 8)}...
-            </p>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">
+                ID: {user.id.slice(0, 8)}...
+              </p>
+            </div>
           </div>
         </div>
 
-        <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
+        <div className="bg-white/5 backdrop-blur-sm rounded-2xl p-4 border border-white/5 relative z-10">
           <div className="flex justify-between items-center mb-1">
             <span className="text-[10px] text-slate-500 font-black uppercase tracking-wider">Available Balance</span>
             <Wallet size={12} className="text-ton-blue" />
           </div>
           <div className="flex items-end gap-2">
-            <span className="text-3xl font-black text-white">{profile?.balance.toFixed(2)}</span>
+            <span className="text-3xl font-black text-white">{(profile?.balance || 0).toFixed(2)}</span>
             <span className="text-sm font-bold text-slate-500 mb-1">TON</span>
           </div>
           
           <button 
             onClick={() => setShowWithdraw(!showWithdraw)}
-            className="w-full mt-4 bg-ton-blue/20 text-ton-blue border border-ton-blue/30 py-3 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-ton-blue hover:text-white transition-all flex items-center justify-center gap-2"
+            className="w-full mt-4 bg-ton-blue text-white py-3 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-ton-blue/80 transition-all flex items-center justify-center gap-2 shadow-lg shadow-ton-blue/20"
           >
             Withdraw <ArrowUpRight size={14} />
           </button>

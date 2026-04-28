@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   username TEXT UNIQUE,
   avatar_url TEXT,
+  wallet_address TEXT,
   balance DECIMAL(20, 4) DEFAULT 0.0000,
   referral_code TEXT UNIQUE,
   referred_by UUID REFERENCES profiles(id),
@@ -29,6 +30,7 @@ CREATE TABLE IF NOT EXISTS lottery_rooms (
   room_name TEXT NOT NULL,
   entry_fee DECIMAL(20, 4) NOT NULL,
   prize_pool DECIMAL(20, 4) DEFAULT 0.0000,
+  max_participants INTEGER DEFAULT 20,
   winner_id UUID REFERENCES profiles(id),
   status TEXT DEFAULT 'active' CHECK (status IN ('active', 'completed', 'cancelled')),
   ends_at TIMESTAMPTZ NOT NULL,
@@ -124,8 +126,14 @@ CREATE POLICY "View own completed tasks" ON user_tasks FOR SELECT USING (auth.ui
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS trigger AS $$
 BEGIN
-  INSERT INTO public.profiles (id, referral_code)
-  VALUES (new.id, encode(gen_random_bytes(6), 'hex'));
+  INSERT INTO public.profiles (id, username, wallet_address, referral_code, referred_by)
+  VALUES (
+    new.id, 
+    new.raw_user_meta_data->>'username',
+    new.raw_user_meta_data->>'wallet_address',
+    encode(gen_random_bytes(6), 'hex'),
+    (new.raw_user_meta_data->>'referred_by')::uuid
+  );
   RETURN new;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;

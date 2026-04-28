@@ -20,19 +20,24 @@ function WalletAuthSync() {
   const wallet = useTonWallet();
 
   useEffect(() => {
+    let isMounted = true;
+
     async function sync() {
       if (wallet?.account.address) {
-        const address = wallet.account.address;
-        const email = `${address.toLowerCase()}@tonbet.internal`;
-        const password = `wallet_${address}`;
+        // Normalize address to ensure consistency
+        const rawAddress = wallet.account.address;
+        const address = rawAddress.toLowerCase();
+        const email = `${address}@tonbet.internal`;
+        const password = `wallet_${rawAddress}`; // Keep raw for password consistency if desired, or use normalized
 
-        // Check for referrer in URL
-        const urlParams = new URLSearchParams(window.location.search);
-        const referrer = urlParams.get('ref') || urlParams.get('tgWebAppStartParam');
+        console.log('Syncing wallet:', address);
 
-        // Check if user is already logged in with this wallet
+        // Check current session
         const { data: { user } } = await supabase.auth.getUser();
-        if (user && user.email === email) return;
+        if (isMounted && user && user.email === email) {
+          console.log('Already synced with Supabase');
+          return;
+        }
 
         // Try sign in
         const { error: signInError } = await supabase.auth.signInWithPassword({
@@ -41,27 +46,58 @@ function WalletAuthSync() {
         });
 
         if (signInError) {
-          // If sign in fails, try sign up
+          console.log('SignIn failed, attempting SignUp...', signInError.message);
+          
+          // Check for referrer
+          const urlParams = new URLSearchParams(window.location.search);
+          const referrerAddress = urlParams.get('ref') || urlParams.get('tgWebAppStartParam');
+          let referrerId = null;
+
+          if (referrerAddress) {
+            const { data: refProfile } = await supabase
+              .from('profiles')
+              .select('id')
+              .eq('wallet_address', referrerAddress)
+              .single();
+            if (refProfile) referrerId = refProfile.id;
+          }
+
+          // Try sign up
           const { error: signUpError } = await supabase.auth.signUp({
             email,
             password,
             options: {
               data: {
-                wallet_address: address,
-                username: `User_${address.slice(-4)}`,
-                referred_by: referrer
+                wallet_address: rawAddress,
+                username: `User_${rawAddress.slice(-4)}`,
+                referred_by: referrerId
               }
             }
           });
           
           if (signUpError) {
-            console.error('Supabase Auth Sync Error:', signUpError.message);
+            console.error('Supabase Auth Sync (SignUp) Error:', signUpError.message);
+            
+            // If already registered but signIn failed, maybe password mismatch or lockout
+            // Re-attempting signIn with normalized password just in case
+            if (signUpError.message.includes('already registered')) {
+               const { error: retryError } = await supabase.auth.signInWithPassword({
+                 email,
+                 password: `wallet_${address}`, 
+               });
+               if (retryError) console.error('Final retry failed:', retryError.message);
+            }
+          } else {
+            console.log('SignUp success');
           }
+        } else {
+          console.log('SignIn success');
         }
       }
     }
 
     sync();
+    return () => { isMounted = false; };
   }, [wallet]);
 
   return null;
