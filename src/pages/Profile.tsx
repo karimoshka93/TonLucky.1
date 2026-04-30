@@ -1,33 +1,29 @@
-import { useState, useEffect, FormEvent } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { useState, useEffect } from 'react';
+import { motion } from 'motion/react';
 import { 
   User as UserIcon, 
-  Wallet, 
   History, 
   Ticket, 
   Gift, 
-  Target,
   ArrowUpRight, 
   ArrowDownLeft, 
   ExternalLink,
   ChevronRight,
   Mail,
   ShieldCheck,
-  AlertCircle,
   Info,
   RefreshCw,
-  Users
+  Wallet
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { Link } from 'react-router-dom';
 import { cn } from '../lib/utils';
-import { useTonWallet } from '@tonconnect/ui-react';
 
 interface ProfileData {
   id: string;
   username: string;
   balance: number;
-  referral_code: string;
+  avatar_url: string;
 }
 
 interface Transaction {
@@ -53,7 +49,6 @@ interface BoxLog {
 }
 
 export default function Profile() {
-  const wallet = useTonWallet();
   const [user, setUser] = useState<any>(null);
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -62,63 +57,65 @@ export default function Profile() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'transactions' | 'games'>('transactions');
   
-  const [withdrawAmount, setWithdrawAmount] = useState('');
-  const [walletAddress, setWalletAddress] = useState('');
-  const [showWithdraw, setShowWithdraw] = useState(false);
-  const [withdrawStatus, setWithdrawStatus] = useState<{ type: 'success' | 'error', msg: string } | null>(null);
+  const tgUser = (window as any).Telegram?.WebApp?.initDataUnsafe?.user;
 
-  const getInitialData = async () => {
+  const fetchData = async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      setUser(user);
-
-      if (user) {
-        // Fetch Profile
-        const { data: pData } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', user.id)
-          .single();
-        
-        if (pData) setProfile(pData);
-
-        // Fetch Transactions
-        const { data: tData } = await supabase
-          .from('transactions')
-          .select('*')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false })
-          .limit(10);
-        
-        if (tData) setTransactions(tData);
-
-        // Fetch Tickets
-        const { data: ticketData } = await supabase
-          .from('tickets')
-          .select('*, lottery_rooms(name)')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false })
-          .limit(10);
-        
-        if (ticketData) {
-          setTickets(ticketData.map((t: any) => ({
-            id: t.id,
-            room_name: t.lottery_rooms?.name || 'Unknown Room',
-            ticket_number: t.ticket_number || 0,
-            created_at: t.created_at
-          })));
-        }
-
-        // Fetch Box Logs
-        const { data: bData } = await supabase
-          .from('mystery_box_logs')
-          .select('*')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false })
-          .limit(10);
-        
-        if (bData) setBoxLogs(bData);
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser) {
+        setUser(null);
+        setLoading(false);
+        return;
       }
+      
+      setUser(authUser);
+
+      // Fetch Profile
+      const { data: pData } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', authUser.id)
+        .single();
+      
+      if (pData) setProfile(pData);
+
+      // Fetch Transactions
+      const { data: tData } = await supabase
+        .from('transactions')
+        .select('*')
+        .eq('user_id', authUser.id)
+        .order('created_at', { ascending: false })
+        .limit(20);
+      
+      if (tData) setTransactions(tData);
+
+      // Fetch Tickets
+      const { data: ticketData } = await supabase
+        .from('tickets')
+        .select('*, lottery_rooms(room_name)')
+        .eq('user_id', authUser.id)
+        .order('created_at', { ascending: false })
+        .limit(10);
+      
+      if (ticketData) {
+        setTickets(ticketData.map((t: any) => ({
+          id: t.id,
+          room_name: t.lottery_rooms?.room_name || 'Lottery Entry',
+          ticket_number: t.ticket_number || 0,
+          created_at: t.created_at
+        })));
+      }
+
+      // Fetch Box Logs
+      const { data: bData } = await supabase
+        .from('mystery_box_logs')
+        .select('*')
+        .eq('user_id', authUser.id)
+        .order('created_at', { ascending: false })
+        .limit(10);
+      
+      if (bData) setBoxLogs(bData);
+
     } catch (e) {
       console.error('Data fetch error:', e);
     } finally {
@@ -127,406 +124,255 @@ export default function Profile() {
   };
 
   useEffect(() => {
-    getInitialData();
-
-    // Listen for auth state changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
-        setLoading(true);
-        getInitialData();
-      } else if (event === 'SIGNED_OUT') {
-        setUser(null);
-        setProfile(null);
-        setLoading(false);
-      }
-    });
-
-    return () => subscription.unsubscribe();
+    fetchData();
+    const interval = setInterval(fetchData, 10000); // Pulse data every 10s
+    return () => clearInterval(interval);
   }, []);
 
-  const handleWithdraw = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!profile || Number(withdrawAmount) > profile.balance) {
-      setWithdrawStatus({ type: 'error', msg: 'Insufficient balance' });
-      return;
-    }
-
-    try {
-      const { error } = await supabase
-        .from('withdrawals')
-        .insert({
-          user_id: user.id,
-          amount: Number(withdrawAmount),
-          wallet_address: walletAddress,
-          status: 'pending'
-        });
-
-      if (error) throw error;
-
-      setWithdrawStatus({ type: 'success', msg: 'Withdrawal request submitted!' });
-      setWithdrawAmount('');
-      setWalletAddress('');
-      setTimeout(() => setShowWithdraw(false), 2000);
-    } catch (err) {
-      setWithdrawStatus({ type: 'error', msg: 'Failed to submit request' });
-    }
-  };
-
-  const [syncTimeout, setSyncTimeout] = useState(false);
-  const [tgUser] = useState(() => (window as any).Telegram?.WebApp?.initDataUnsafe?.user);
-
-  useEffect(() => {
-    let timer: any;
-    // Only set timeout if we actually have a context (TG or Wallet) but no user session yet
-    if ((wallet || tgUser) && !user) {
-      timer = setTimeout(() => {
-        setSyncTimeout(true);
-      }, 10000); // 10s is enough
-    }
-    return () => clearTimeout(timer);
-  }, [wallet, user, tgUser]);
-
-  const handleManualSync = async () => {
-    setLoading(true);
-    setSyncTimeout(false);
-    try {
-      const { data: { user: currentUser } } = await supabase.auth.getUser();
-      if (currentUser) {
-        setUser(currentUser);
-        await getInitialData();
-      } else {
-        // Heartbeat will naturally try again, we just wait a bit
-        await new Promise(r => setTimeout(r, 1500));
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // 1. Loading state (Actually fetching DB data)
-  if (loading && user) {
+  if (loading && !user) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen gap-4">
         <RefreshCw size={32} className="text-ton-blue animate-spin" />
-        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 italic">Data loading...</p>
+        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 italic">Authenticating Profile...</p>
       </div>
     );
   }
 
-  // 2. Syncing state (Waiting for Auth session)
-  if (!user && (wallet || tgUser) && !syncTimeout) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-screen gap-6 px-6 text-center">
-        <div className="w-20 h-20 rounded-3xl bg-ton-blue/10 border border-ton-blue/20 flex items-center justify-center animate-pulse">
-           <Wallet className="text-ton-blue" size={40} />
-        </div>
-        <div>
-          <h2 className="text-2xl font-black mb-2 italic uppercase tracking-tight">Syncing Session</h2>
-          <p className="text-slate-400 text-sm max-w-[240px] leading-relaxed">
-            Establishing a secure connection to your Telegram profile...
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  // 3. Sync Error state (If Auth session never arrives)
-  if (!user && (wallet || tgUser) && syncTimeout) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-screen px-6 text-center gap-6">
-        <div className="w-20 h-20 bg-amber-500/10 border border-amber-500/20 rounded-3xl flex items-center justify-center mb-2 animate-bounce">
-           <AlertCircle size={40} className="text-amber-500" />
-        </div>
-        <div>
-          <h2 className="text-2xl font-black mb-2 italic text-amber-500">Sync Error</h2>
-          <p className="text-slate-400 text-sm max-w-[240px] leading-relaxed mb-6">
-            We couldn't link your Telegram account to our servers.
-          </p>
-          <div className="flex flex-col gap-3">
-            <button 
-              onClick={handleManualSync}
-              className="bg-ton-blue text-white py-4 px-10 rounded-2xl text-xs font-black uppercase tracking-widest hover:scale-105 transition-all shadow-xl shadow-ton-blue/20"
-            >
-              Retry Sync
-            </button>
-            <button 
-              onClick={() => window.location.reload()}
-              className="text-[10px] font-black uppercase tracking-widest text-slate-500 hover:text-white transition-all"
-            >
-              Reload App
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // 4. Fallback for NO context at all
-  if (!user && !wallet && !tgUser) {
+  if (!user && !loading) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen px-6 text-center">
-        <div className="w-20 h-20 bg-amber-500/10 border border-amber-500/20 rounded-3xl flex items-center justify-center mb-6 shadow-xl shadow-amber-500/5">
-          <AlertCircle size={40} className="text-amber-500" />
+        <div className="w-20 h-20 bg-ton-blue/10 border border-ton-blue/20 rounded-3xl flex items-center justify-center mb-6 shadow-xl shadow-ton-blue/5">
+          <UserIcon size={40} className="text-ton-blue" />
         </div>
-        <h2 className="text-2xl font-black mb-2 italic">Login Required</h2>
-        <p className="text-slate-400 text-sm max-w-[240px] leading-relaxed mb-8">
-          Please connect your wallet through the <span className="text-ton-blue font-bold">Connect Wallet</span> button to view your profile and rewards.
+        <h2 className="text-2xl font-black mb-2 italic uppercase">Identity Required</h2>
+        <p className="text-slate-400 text-sm max-w-[240px] leading-relaxed mb-8 italic">
+          Please wait while we establish your secure Telegram session...
         </p>
-        <Link to="/" className="bg-[#161920] border border-white/5 py-4 px-8 rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-white hover:text-black transition-all">
-          Go to Home
-        </Link>
+        <button 
+          onClick={() => window.location.reload()}
+          className="bg-[#161920] border border-white/5 py-4 px-8 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-white hover:text-black transition-all"
+        >
+          Reload Session
+        </button>
       </div>
     );
   }
 
   return (
-    <div className="px-6 pt-8 pb-32 max-w-md mx-auto min-h-screen">
-      {/* Profile Header */}
-      <div className="bg-gradient-to-br from-[#1e222b] to-[#14161c] border border-white/10 rounded-[32px] p-6 mb-4 shadow-xl relative overflow-hidden group">
-        <div className="absolute -top-10 -right-10 w-32 h-32 bg-ton-blue/10 rounded-full blur-3xl group-hover:bg-ton-blue/20 transition-all duration-700" />
-        
-        <div className="flex items-center gap-4 mb-6 relative z-10">
-          <div className="w-16 h-16 rounded-2xl bg-ton-blue/20 flex items-center justify-center text-ton-blue border border-ton-blue/30 shadow-lg shadow-ton-blue/10">
-            <UserIcon size={32} />
-          </div>
-          <div>
-            <h2 className="text-xl font-black italic">
-              {profile?.username || tgUser?.username || tgUser?.first_name || 'Premium Player'}
-            </h2>
-            <div className="flex items-center gap-2 mt-1">
-              <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">
-                {user ? `ID: ${user.id.slice(0, 8)}...` : 'Syncing Profile...'}
-              </p>
-            </div>
+    <div className="px-6 pt-10 pb-32 max-w-md mx-auto min-h-screen">
+      {/* Profile Identity Card */}
+      <div className="bg-[#1e222b] border border-white/5 rounded-[32px] p-6 mb-4 shadow-2xl relative overflow-hidden">
+        <div className="absolute top-0 right-0 p-4">
+          <div className="px-3 py-1 bg-ton-blue/10 border border-ton-blue/20 rounded-full flex items-center gap-2">
+            <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
+            <span className="text-[8px] font-black text-ton-blue uppercase tracking-widest">Live Profile</span>
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3 mb-6 relative z-10">
-          <div className="bg-white/5 backdrop-blur-sm rounded-2xl p-4 border border-white/5">
-            <div className="flex justify-between items-center mb-1">
-              <span className="text-[9px] text-slate-500 font-black uppercase tracking-wider">Balance</span>
-              <Wallet size={10} className="text-ton-blue" />
-            </div>
-            <div className="flex items-center gap-1">
-              <span className="text-lg font-black text-white">{(profile?.balance || 0).toFixed(2)}</span>
-              <span className="text-[8px] font-bold text-slate-500 mt-1">TON</span>
-            </div>
+        <div className="flex flex-col items-center text-center mb-8 pt-4">
+          <div className="relative mb-4 group">
+            <div className="absolute inset-0 bg-ton-blue blur-2xl opacity-20 rounded-full scale-110 group-hover:opacity-40 transition-opacity" />
+            {tgUser?.photo_url ? (
+              <img 
+                referrerPolicy="no-referrer"
+                src={tgUser.photo_url} 
+                alt="Profile" 
+                className="w-24 h-24 rounded-[32px] border-4 border-[#252a35] shadow-2xl relative z-10 object-cover"
+              />
+            ) : (
+              <div className="w-24 h-24 rounded-[32px] bg-[#252a35] border-4 border-[#252a35] flex items-center justify-center relative z-10 shadow-2xl">
+                <UserIcon size={40} className="text-ton-blue opacity-50" />
+              </div>
+            )}
           </div>
-          <div className="bg-white/5 backdrop-blur-sm rounded-2xl p-4 border border-white/5">
-            <div className="flex justify-between items-center mb-1">
-              <span className="text-[9px] text-slate-500 font-black uppercase tracking-wider">Ref Earned</span>
-              <Target size={10} className="text-amber-500" />
-            </div>
-            <div className="flex items-center gap-1">
-              <span className="text-lg font-black text-amber-500">{(profile as any)?.total_earned_referral?.toFixed(2) || '0.00'}</span>
-              <span className="text-[8px] font-bold text-slate-500 mt-1">TON</span>
-            </div>
+          
+          <h2 className="text-2xl font-black italic tracking-tight text-white mb-1">
+            {tgUser?.username ? `@${tgUser.username}` : (tgUser?.first_name || profile?.username || 'Premium Player')}
+          </h2>
+          <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.2em] italic">
+            ID: {tgUser?.id || user?.id.slice(0, 8)}
+          </p>
+        </div>
+
+        <div className="bg-black/20 rounded-2xl p-6 border border-white/5 flex flex-col items-center gap-2">
+          <span className="text-[9px] text-slate-500 font-extrabold uppercase tracking-[0.2em]">Available Balance</span>
+          <div className="flex items-center gap-2">
+            <span className="text-4xl font-black text-white italic">
+              {(profile?.balance || 0).toFixed(2)}
+            </span>
+            <span className="text-xs font-black text-ton-blue bg-ton-blue/10 px-2 py-1 rounded-lg">TON</span>
           </div>
         </div>
 
-        <button 
-          onClick={() => setShowWithdraw(!showWithdraw)}
-          className="w-full relative z-10 bg-ton-blue text-white py-3.5 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-ton-blue/80 transition-all flex items-center justify-center gap-2 shadow-lg shadow-ton-blue/20"
-        >
-          Withdraw Funds <ArrowUpRight size={14} />
-        </button>
+        <div className="grid grid-cols-2 gap-3 mt-4">
+          <Link to="/deposit" className="flex items-center justify-center gap-2 bg-white text-black py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:scale-[1.02] active:scale-[0.98] transition-all">
+            Add Funds <ArrowDownLeft size={14} />
+          </Link>
+          <button className="flex items-center justify-center gap-2 bg-white/5 border border-white/10 text-white py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-white/10 transition-all">
+            Withdraw <ArrowUpRight size={14} />
+          </button>
+        </div>
       </div>
 
-      {/* Referral Quick Link */}
-      <Link to="/referral" className="flex items-center justify-between p-4 bg-[#1e222b] border border-white/5 rounded-2xl mb-6 group">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center text-amber-500 group-hover:scale-110 transition-transform">
-            <Users size={16} />
-          </div>
-          <div className="text-left">
-            <h4 className="text-[10px] font-black uppercase tracking-[0.1em] text-white">Invite Friends</h4>
-            <p className="text-[9px] text-slate-500 font-medium">Earn lifetime lifetime bonuses</p>
-          </div>
-        </div>
-        <ChevronRight size={14} className="text-slate-600 group-hover:text-amber-500 transition-colors" />
-      </Link>
-
-      {/* Withdraw Form */}
-      <AnimatePresence>
-        {showWithdraw && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="overflow-hidden mb-6"
-          >
-            <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-5">
-              <h3 className="text-sm font-black text-amber-500 uppercase tracking-wider mb-4">Request Withdrawal</h3>
-              <form onSubmit={handleWithdraw} className="space-y-4">
-                <div>
-                  <label className="text-[10px] text-slate-500 font-black uppercase block mb-1.5 ml-1">Wallet Address</label>
-                  <input 
-                    type="text"
-                    required
-                    value={walletAddress}
-                    onChange={(e) => setWalletAddress(e.target.value)}
-                    placeholder="Enter TON address"
-                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-amber-500/50 transition-colors"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] text-slate-500 font-black uppercase block mb-1.5 ml-1">Amount (TON)</label>
-                  <input 
-                    type="number"
-                    step="0.1"
-                    required
-                    value={withdrawAmount}
-                    onChange={(e) => setWithdrawAmount(e.target.value)}
-                    placeholder="Min 5.0 TON"
-                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-amber-500/50 transition-colors"
-                  />
-                </div>
-                {withdrawStatus && (
-                  <p className={cn(
-                    "text-[10px] font-bold text-center uppercase tracking-widest p-2 rounded-lg",
-                    withdrawStatus.type === 'error' ? 'bg-red-500/10 text-red-500' : 'bg-green-500/10 text-green-500'
-                  )}>
-                    {withdrawStatus.msg}
-                  </p>
-                )}
-                <button className="w-full bg-amber-500 text-white font-black py-3 rounded-xl text-xs uppercase tracking-widest active:scale-[0.98] transition-transform">
-                  Submit Request
-                </button>
-              </form>
+      {/* Stats Quick Link */}
+      <div className="grid grid-cols-2 gap-3 mb-6">
+        <Link to="/referral" className="flex items-center justify-between p-4 bg-[#1e222b] border border-white/5 rounded-2xl group">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center text-amber-500">
+              <RefreshCw size={14} />
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            <span className="text-[9px] font-black text-white uppercase tracking-widest">Referrals</span>
+          </div>
+          <ChevronRight size={12} className="text-slate-600" />
+        </Link>
+        <div className="flex items-center justify-between p-4 bg-[#1e222b] border border-white/5 rounded-2xl">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-ton-blue/10 flex items-center justify-center text-ton-blue">
+              <Wallet size={14} />
+            </div>
+            <span className="text-[9px] font-black text-white uppercase tracking-widest italic">Verified</span>
+          </div>
+          <ShieldCheck size={12} className="text-green-500" />
+        </div>
+      </div>
 
       {/* Tabs */}
-      <div className="flex bg-white/5 p-1 rounded-2xl mb-4 border border-white/5">
+      <div className="flex bg-[#1e222b] p-1.5 rounded-2xl mb-4 border border-white/5">
         <button 
           onClick={() => setActiveTab('transactions')}
           className={cn(
             "flex-1 py-3 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all flex items-center justify-center gap-2",
-            activeTab === 'transactions' ? "bg-white text-black shadow-lg" : "text-slate-400 hover:text-white"
+            activeTab === 'transactions' ? "bg-white text-black" : "text-slate-500"
           )}
         >
-          <History size={14} /> Transactions
+          <History size={14} /> Activity
         </button>
         <button 
           onClick={() => setActiveTab('games')}
           className={cn(
             "flex-1 py-3 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all flex items-center justify-center gap-2",
-            activeTab === 'games' ? "bg-white text-black shadow-lg" : "text-slate-400 hover:text-white"
+            activeTab === 'games' ? "bg-white text-black" : "text-slate-500"
           )}
         >
-          <Target size={14} /> Game History
+          <Ticket size={14} /> Game Log
         </button>
       </div>
 
-      {/* Tab Content */}
+      {/* Records List */}
       <div className="space-y-3">
         {activeTab === 'transactions' ? (
           transactions.length > 0 ? (
             transactions.map((tx) => (
-              <div key={tx.id} className="p-4 bg-[#1e222b]/50 border border-white/5 rounded-2xl flex items-center justify-between">
+              <motion.div 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                key={tx.id} 
+                className="p-4 bg-[#1e222b]/40 border border-white/5 rounded-2xl flex items-center justify-between"
+              >
                 <div className="flex items-center gap-3">
                   <div className={cn(
-                    "w-8 h-8 rounded-lg flex items-center justify-center",
+                    "w-10 h-10 rounded-xl flex items-center justify-center",
                     tx.amount > 0 ? "bg-green-500/10 text-green-500" : "bg-red-500/10 text-red-500"
                   )}>
-                    {tx.amount > 0 ? <ArrowDownLeft size={16} /> : <ArrowUpRight size={16} />}
+                    {tx.amount > 0 ? <ArrowDownLeft size={18} /> : <ArrowUpRight size={18} />}
                   </div>
                   <div>
-                    <h4 className="text-xs font-bold text-white capitalize">{tx.type.replace('_', ' ')}</h4>
-                    <p className="text-[10px] text-slate-500 mt-0.5">{new Date(tx.created_at).toLocaleDateString()}</p>
+                    <h4 className="text-xs font-black text-white capitalize italic tracking-wide">
+                      {tx.type.replace('_', ' ')}
+                    </h4>
+                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-0.5">
+                      {new Date(tx.created_at).toLocaleDateString()}
+                    </p>
                   </div>
                 </div>
                 <span className={cn(
-                  "text-sm font-black",
+                  "text-sm font-black italic",
                   tx.amount > 0 ? "text-green-500" : "text-red-500"
                 )}>
                   {tx.amount > 0 ? '+' : ''}{tx.amount}
                 </span>
-              </div>
+              </motion.div>
             ))
           ) : (
-            <div className="text-center py-10 text-slate-500 italic text-[11px]">No transactions yet</div>
+            <div className="flex flex-col items-center justify-center py-20 text-slate-600 gap-4">
+              <History size={40} className="opacity-20" />
+              <p className="italic text-[10px] font-black uppercase tracking-[0.2em]">No transactions recorded</p>
+            </div>
           )
         ) : (
           <div className="space-y-3">
-            {tickets.map((ticket) => (
-              <div key={ticket.id} className="p-4 bg-[#1e222b]/50 border border-white/5 rounded-2xl flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-ton-blue/10 text-ton-blue flex items-center justify-center">
-                    <Ticket size={16} />
+            {[...tickets, ...boxLogs].length > 0 ? (
+              <>
+                {tickets.map((ticket) => (
+                  <div key={ticket.id} className="p-4 bg-[#1e222b]/40 border border-white/5 rounded-2xl flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-ton-blue/10 text-ton-blue flex items-center justify-center">
+                        <Ticket size={18} />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-black text-white uppercase italic">{ticket.room_name}</h4>
+                        <p className="text-[10px] text-slate-500 font-bold tracking-widest mt-0.5">Ticket #{ticket.ticket_number}</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[10px] font-black text-slate-400 italic">{new Date(ticket.created_at).toLocaleDateString()}</p>
+                    </div>
                   </div>
-                  <div>
-                    <h4 className="text-xs font-bold text-white">{ticket.room_name}</h4>
-                    <p className="text-[10px] text-slate-500 mt-0.5">Ticket #{ticket.ticket_number}</p>
+                ))}
+                {boxLogs.map((log) => (
+                  <div key={log.id} className="p-4 bg-[#1e222b]/40 border border-white/5 rounded-2xl flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-purple-500/10 text-purple-500 flex items-center justify-center">
+                        <Gift size={18} />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-black text-white italic">Mystery Box Roll</h4>
+                        <p className="text-[10px] text-slate-500 font-bold tracking-widest mt-0.5 capitalize">{log.reward_type}</p>
+                      </div>
+                    </div>
+                    <span className="text-sm font-black text-purple-400 italic">
+                      {log.reward_amount > 0 ? `+${log.reward_amount} TON` : 'Empty Box'}
+                    </span>
                   </div>
-                </div>
-                <div className="text-right">
-                  <p className="text-[10px] font-black text-slate-400">{new Date(ticket.created_at).toLocaleDateString()}</p>
-                </div>
+                ))}
+              </>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-20 text-slate-600 gap-4">
+                <Ticket size={40} className="opacity-20" />
+                <p className="italic text-[10px] font-black uppercase tracking-[0.2em]">No gaming activity recorded</p>
               </div>
-            ))}
-            {boxLogs.map((log) => (
-              <div key={log.id} className="p-4 bg-[#1e222b]/50 border border-white/5 rounded-2xl flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-purple-500/10 text-purple-500 flex items-center justify-center">
-                    <Gift size={16} />
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-bold text-white">Mystery Box Roll</h4>
-                    <p className="text-[10px] text-slate-500 mt-0.5">{log.reward_type}</p>
-                  </div>
-                </div>
-                <span className="text-xs font-black text-purple-400">
-                  {log.reward_amount > 0 ? `+${log.reward_amount} TON` : 'Try Again'}
-                </span>
-              </div>
-            ))}
-            {tickets.length === 0 && boxLogs.length === 0 && (
-              <div className="text-center py-10 text-slate-500 italic text-[11px]">No game history yet</div>
             )}
           </div>
         )}
       </div>
 
-      {/* Support Section */}
-      <div className="mt-12 pt-8 border-t border-white/5">
-        <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-4 text-center">Support & Security</h3>
-        <div className="space-y-2">
-          <a 
-            href="mailto:xtonbet@gmail.com"
-            className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5 hover:bg-white/10 transition-all group"
-          >
-            <div className="flex items-center gap-3">
-              <Mail size={18} className="text-ton-blue" />
-              <span className="text-xs font-bold">Contact Support</span>
+      {/* Extra Info */}
+      <div className="mt-12 space-y-3">
+        <a href="mailto:support@tonbet.io" className="flex items-center justify-between p-5 bg-[#1e222b] border border-white/5 rounded-2xl group transition-all">
+          <div className="flex items-center gap-4">
+            <Mail size={20} className="text-ton-blue group-hover:scale-110 transition-transform" />
+            <div>
+              <h4 className="text-[10px] font-black text-white uppercase tracking-widest">Technical Support</h4>
+              <p className="text-[9px] text-slate-600 font-bold uppercase mt-0.5 tracking-tight">Response within 24 hours</p>
             </div>
-            <ExternalLink size={14} className="text-slate-600 group-hover:text-white" />
-          </a>
-          <div className="p-4 bg-white/5 rounded-2xl border border-white/5 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <ShieldCheck size={18} className="text-green-500" />
-              <div className="text-xs font-bold">Fair Play Secured</div>
-            </div>
-            <div className="px-2 py-0.5 rounded-md bg-green-500/10 text-green-500 text-[8px] font-black uppercase">Verified</div>
           </div>
-          <Link 
-            to="/about"
-            className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5 hover:bg-white/10 transition-all group"
-          >
-            <div className="flex items-center gap-3">
-              <Info size={18} className="text-amber-500" />
-              <span className="text-xs font-bold">About TonBet</span>
+          <ExternalLink size={14} className="text-slate-700" />
+        </a>
+        <Link to="/about" className="flex items-center justify-between p-5 bg-[#1e222b] border border-white/5 rounded-2xl group transition-all">
+          <div className="flex items-center gap-4">
+            <Info size={20} className="text-amber-500 group-hover:scale-110 transition-transform" />
+            <div>
+              <h4 className="text-[10px] font-black text-white uppercase tracking-widest">Platform Info</h4>
+              <p className="text-[9px] text-slate-600 font-bold uppercase mt-0.5 tracking-tight">Fair Play & Rules</p>
             </div>
-            <ExternalLink size={14} className="text-slate-600 group-hover:text-white" />
-          </Link>
-        </div>
-        <p className="text-[9px] text-center text-slate-600 mt-6 font-medium">
-          Official Support: <span className="text-ton-blue">xtonbet@gmail.com</span>
-        </p>
+          </div>
+          <ExternalLink size={14} className="text-slate-700" />
+        </Link>
       </div>
+
+      <p className="mt-8 text-center text-[9px] font-black text-slate-700 uppercase tracking-[0.3em] italic">
+        Powered by TON Blockchain
+      </p>
     </div>
   );
 }
