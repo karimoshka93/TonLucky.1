@@ -172,26 +172,37 @@ export default function Profile() {
     }
   };
 
-  // Sync timeout to avoid getting stuck
   const [syncTimeout, setSyncTimeout] = useState(false);
+  const [tgUser] = useState(() => (window as any).Telegram?.WebApp?.initDataUnsafe?.user);
 
   useEffect(() => {
     let timer: any;
     if (wallet && !user) {
       timer = setTimeout(() => {
         setSyncTimeout(true);
-      }, 10000); // 10 seconds
+      }, 15000); // Increased to 15s for better reliability
     }
     return () => clearTimeout(timer);
   }, [wallet, user]);
 
-  const handleManualSync = () => {
+  const handleManualSync = async () => {
     setLoading(true);
     setSyncTimeout(false);
-    getInitialData();
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        setUser(user);
+        await getInitialData();
+      } else {
+        // Force a small delay to show we tried
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
-  if (loading && !user && wallet) {
+  if (loading || (wallet && !user && !syncTimeout)) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen gap-6 px-6 text-center">
         <div className="w-20 h-20 rounded-3xl bg-ton-blue/10 border border-ton-blue/20 flex items-center justify-center animate-pulse">
@@ -207,33 +218,31 @@ export default function Profile() {
     );
   }
 
-  if (loading) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-screen gap-4">
-        <RefreshCw size={32} className="text-ton-blue animate-spin" />
-        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 italic">Data loading...</p>
-      </div>
-    );
-  }
-
-  if (wallet && !user) {
-    // If we're here, it means sync is really slow. We just reload once.
+  if (wallet && !user && syncTimeout) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen px-6 text-center gap-6">
         <div className="w-20 h-20 bg-amber-500/10 border border-amber-500/20 rounded-3xl flex items-center justify-center mb-2 animate-bounce">
            <AlertCircle size={40} className="text-amber-500" />
         </div>
         <div>
-          <h2 className="text-2xl font-black mb-2 italic">Sync Error</h2>
-          <p className="text-slate-400 text-sm max-w-[240px] leading-relaxed mb-4">
-            We couldn't connect to your profile. Please try refreshing or checking your wallet.
+          <h2 className="text-2xl font-black mb-2 italic text-amber-500">Sync Error</h2>
+          <p className="text-slate-400 text-sm max-w-[240px] leading-relaxed mb-6">
+            We're having trouble connecting your wallet to your profile.
           </p>
-          <button 
-            onClick={() => window.location.reload()}
-            className="text-[10px] font-black uppercase tracking-widest bg-white text-black px-8 py-4 rounded-2xl hover:bg-ton-blue hover:text-white transition-all shadow-xl shadow-white/10"
-          >
-            Try Again
-          </button>
+          <div className="flex flex-col gap-3">
+            <button 
+              onClick={handleManualSync}
+              className="bg-ton-blue text-white py-4 px-10 rounded-2xl text-xs font-black uppercase tracking-widest hover:scale-105 transition-all shadow-xl shadow-ton-blue/20"
+            >
+              Retry Sync
+            </button>
+            <button 
+              onClick={() => window.location.reload()}
+              className="text-[10px] font-black uppercase tracking-widest text-slate-500 hover:text-white transition-all"
+            >
+              Reload App
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -268,12 +277,12 @@ export default function Profile() {
           </div>
           <div>
             <h2 className="text-xl font-black italic">
-              {profile?.username || 'Premium Player'}
+              {profile?.username || tgUser?.username || tgUser?.first_name || 'Premium Player'}
             </h2>
             <div className="flex items-center gap-2 mt-1">
               <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
               <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">
-                ID: {user.id.slice(0, 8)}...
+                {user ? `ID: ${user.id.slice(0, 8)}...` : 'Syncing Profile...'}
               </p>
             </div>
           </div>

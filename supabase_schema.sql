@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS profiles (
   username TEXT UNIQUE,
   avatar_url TEXT,
   wallet_address TEXT,
+  tg_id BIGINT UNIQUE,
   balance DECIMAL(20, 4) DEFAULT 0.0000,
   referral_code TEXT UNIQUE,
   referred_by UUID REFERENCES profiles(id),
@@ -125,15 +126,38 @@ CREATE POLICY "View own completed tasks" ON user_tasks FOR SELECT USING (auth.ui
 -- 10. FUNCTIONS & TRIGGERS (Auto Profile Creation)
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS trigger AS $$
+DECLARE
+  ref_id UUID;
+  final_username TEXT;
 BEGIN
-  INSERT INTO public.profiles (id, username, wallet_address, referral_code, referred_by)
+  -- Safely parse referral ID
+  BEGIN
+    IF (new.raw_user_meta_data->>'referred_by') IS NOT NULL AND (new.raw_user_meta_data->>'referred_by') != '' THEN
+      ref_id := (new.raw_user_meta_data->>'referred_by')::uuid;
+    ELSE
+      ref_id := NULL;
+    END IF;
+  EXCEPTION WHEN others THEN
+    ref_id := NULL;
+  END;
+
+  -- Ensure we have a username
+  final_username := COALESCE(new.raw_user_meta_data->>'username', 'Player_' || substring(encode(gen_random_bytes(4), 'hex'), 1, 8));
+
+  INSERT INTO public.profiles (id, username, wallet_address, tg_id, referral_code, referred_by)
   VALUES (
     new.id, 
-    new.raw_user_meta_data->>'username',
+    final_username,
     new.raw_user_meta_data->>'wallet_address',
-    encode(gen_random_bytes(6), 'hex'),
-    (new.raw_user_meta_data->>'referred_by')::uuid
-  );
+    (new.raw_user_meta_data->>'tg_id')::bigint,
+    substring(encode(gen_random_bytes(6), 'hex'), 1, 10),
+    ref_id
+  )
+  ON CONFLICT (id) DO UPDATE SET
+    wallet_address = EXCLUDED.wallet_address,
+    tg_id = EXCLUDED.tg_id,
+    username = COALESCE(profiles.username, EXCLUDED.username);
+    
   RETURN new;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
