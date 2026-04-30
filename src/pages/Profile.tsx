@@ -177,32 +177,44 @@ export default function Profile() {
 
   useEffect(() => {
     let timer: any;
-    if (wallet && !user) {
+    // Only set timeout if we actually have a context (TG or Wallet) but no user session yet
+    if ((wallet || tgUser) && !user) {
       timer = setTimeout(() => {
         setSyncTimeout(true);
-      }, 15000); // Increased to 15s for better reliability
+      }, 10000); // 10s is enough
     }
     return () => clearTimeout(timer);
-  }, [wallet, user]);
+  }, [wallet, user, tgUser]);
 
   const handleManualSync = async () => {
     setLoading(true);
     setSyncTimeout(false);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        setUser(user);
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      if (currentUser) {
+        setUser(currentUser);
         await getInitialData();
       } else {
-        // Force a small delay to show we tried
-        await new Promise(r => setTimeout(r, 1000));
+        // Heartbeat will naturally try again, we just wait a bit
+        await new Promise(r => setTimeout(r, 1500));
       }
     } finally {
       setLoading(false);
     }
   };
 
-  if (loading || (wallet && !user && !syncTimeout)) {
+  // 1. Loading state (Actually fetching DB data)
+  if (loading && user) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen gap-4">
+        <RefreshCw size={32} className="text-ton-blue animate-spin" />
+        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 italic">Data loading...</p>
+      </div>
+    );
+  }
+
+  // 2. Syncing state (Waiting for Auth session)
+  if (!user && (wallet || tgUser) && !syncTimeout) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen gap-6 px-6 text-center">
         <div className="w-20 h-20 rounded-3xl bg-ton-blue/10 border border-ton-blue/20 flex items-center justify-center animate-pulse">
@@ -211,14 +223,15 @@ export default function Profile() {
         <div>
           <h2 className="text-2xl font-black mb-2 italic uppercase tracking-tight">Syncing Session</h2>
           <p className="text-slate-400 text-sm max-w-[240px] leading-relaxed">
-            Securing your wallet connection with our servers...
+            Establishing a secure connection to your Telegram profile...
           </p>
         </div>
       </div>
     );
   }
 
-  if (wallet && !user && syncTimeout) {
+  // 3. Sync Error state (If Auth session never arrives)
+  if (!user && (wallet || tgUser) && syncTimeout) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen px-6 text-center gap-6">
         <div className="w-20 h-20 bg-amber-500/10 border border-amber-500/20 rounded-3xl flex items-center justify-center mb-2 animate-bounce">
@@ -227,7 +240,7 @@ export default function Profile() {
         <div>
           <h2 className="text-2xl font-black mb-2 italic text-amber-500">Sync Error</h2>
           <p className="text-slate-400 text-sm max-w-[240px] leading-relaxed mb-6">
-            We're having trouble connecting your wallet to your profile.
+            We couldn't link your Telegram account to our servers.
           </p>
           <div className="flex flex-col gap-3">
             <button 
@@ -248,7 +261,8 @@ export default function Profile() {
     );
   }
 
-  if (!user) {
+  // 4. Fallback for NO context at all
+  if (!user && !wallet && !tgUser) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen px-6 text-center">
         <div className="w-20 h-20 bg-amber-500/10 border border-amber-500/20 rounded-3xl flex items-center justify-center mb-6 shadow-xl shadow-amber-500/5">

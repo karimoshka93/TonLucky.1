@@ -154,9 +154,10 @@ BEGIN
     ref_id
   )
   ON CONFLICT (id) DO UPDATE SET
-    wallet_address = EXCLUDED.wallet_address,
-    tg_id = EXCLUDED.tg_id,
-    username = COALESCE(profiles.username, EXCLUDED.username);
+    wallet_address = COALESCE(EXCLUDED.wallet_address, profiles.wallet_address),
+    tg_id = COALESCE(EXCLUDED.tg_id, profiles.tg_id),
+    username = COALESCE(profiles.username, EXCLUDED.username),
+    updated_at = NOW();
     
   RETURN new;
 END;

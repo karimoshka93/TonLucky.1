@@ -31,22 +31,22 @@ function WalletAuthSync() {
         const tgUser = (window as any).Telegram?.WebApp?.initDataUnsafe?.user;
         const walletAddress = wallet?.account.address;
         
-        // If no Telegram user and no wallet, we can't sync yet
         if (!tgUser && !walletAddress) {
           syncInProgress = false;
           return;
         }
 
-        // Primary identity is Telegram ID if available, fallback to Wallet
+        // Stability: Ensure identity is locked to TG first
         const identityId = tgUser?.id ? `tg_${tgUser.id}` : `wallet_${walletAddress?.toLowerCase()}`;
         const email = `${identityId}@tonbet.internal`;
         const password = `secret_${identityId}`;
-        const username = tgUser?.username || tgUser?.first_name || `TonPlayer_${walletAddress?.slice(-8)}`;
+        const username = tgUser?.username || tgUser?.first_name || (walletAddress ? `TonPlayer_${walletAddress.slice(-8)}` : 'Guest');
 
-        // 1. Check current session
         const { data: { user: currentUser } } = await supabase.auth.getUser();
+        
+        // If already logged in as the correct user
         if (isMounted && currentUser && currentUser.email === email) {
-          // If we have a session but no wallet_address in profile yet, we should update it
+          // Check if profile needs wallet update
           if (walletAddress) {
             await supabase.from('profiles').update({ wallet_address: walletAddress }).eq('id', currentUser.id);
           }
@@ -54,24 +54,17 @@ function WalletAuthSync() {
           return;
         }
 
-        // 2. Try sign in
-        const { error: signInError } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
+        // Try sign in first (fastest)
+        const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
 
         if (signInError) {
-          // 3. Attempt SignUp
+          // If sign in fails, it might be a new user
           const urlParams = new URLSearchParams(window.location.search);
           const referrerAddress = urlParams.get('ref') || urlParams.get('tgWebAppStartParam');
           let referrerId = null;
 
           if (referrerAddress) {
-            const { data: refProfile } = await supabase
-              .from('profiles')
-              .select('id')
-              .eq('wallet_address', referrerAddress)
-              .single();
+            const { data: refProfile } = await supabase.from('profiles').select('id').eq('wallet_address', referrerAddress).single();
             if (refProfile) referrerId = refProfile.id;
           }
 
@@ -93,14 +86,14 @@ function WalletAuthSync() {
           }
         }
       } catch (e) {
-        console.error('Telegram sync error:', e);
+        console.error('Critical sync failure:', e);
       } finally {
         syncInProgress = false;
       }
     }
 
-    sync();
-    const interval = setInterval(sync, 10000); 
+    sync(); // Run immediately on mount
+    const interval = setInterval(sync, 5000); 
     return () => { isMounted = false; clearInterval(interval); };
   }, [wallet]);
 
