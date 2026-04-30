@@ -4,6 +4,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
+import crypto from 'crypto';
 
 dotenv.config();
 
@@ -29,9 +30,97 @@ async function startServer() {
 
   app.use(express.json());
 
-  // API Routes
+  // --- TELEGRAM VERIFICATION HELPERS ---
+  const verifyTelegramInitData = (initData: string) => {
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    if (!token) {
+      console.error("TELEGRAM_BOT_TOKEN is missing in environment");
+      return false;
+    }
+
+    const encoded = decodeURIComponent(initData);
+    const secretKey = crypto.createHmac("sha256", "WebAppData").update(token).digest();
+    
+    const arr = encoded.split("&");
+    const hashIndex = arr.findIndex(str => str.startsWith("hash="));
+    const hash = arr.splice(hashIndex, 1)[0].split("=")[1];
+    
+    arr.sort();
+    const dataCheckString = arr.join("\n");
+    const _hash = crypto.createHmac("sha256", secretKey).update(dataCheckString).digest("hex");
+
+    return _hash === hash;
+  };
+
+  // --- API ROUTES ---
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok", version: "1.0.0" });
+  });
+
+  // Master Sync: Verifies TG identity and returns Supabase credentials
+  app.post("/api/user/sync", async (req, res) => {
+    const { initData } = req.body;
+
+    if (!initData || !verifyTelegramInitData(initData)) {
+      return res.status(401).json({ error: "Invalid Telegram credentials" });
+    }
+
+    // Extract user data from initData
+    const params = new URLSearchParams(initData);
+    const tgUser = JSON.parse(params.get("user") || "{}");
+    
+    if (!tgUser.id) {
+      return res.status(400).json({ error: "No user ID in Telegram data" });
+    }
+
+    const identityId = `tg_${tgUser.id}`;
+    const email = `${identityId}@tonbet.internal`;
+    const password = crypto.createHash("sha256").update(`${tgUser.id}_${process.env.TELEGRAM_BOT_TOKEN}`).digest("hex");
+    const username = tgUser.username || tgUser.first_name || `TonPlayer_${tgUser.id}`;
+
+    try {
+      // 1. Ensure user exists in Supabase Auth
+      const { data: { user }, error: fetchError } = await supabaseAdmin.auth.admin.getUserById(identityId).catch(() => ({ data: { user: null }, error: null }));
+      
+      let currentUser = user;
+
+      if (!currentUser) {
+        // Try finding by email to be safe
+        const { data: users } = await supabaseAdmin.auth.admin.listUsers();
+        currentUser = users.users.find(u => u.email === email) || null;
+      }
+
+      if (!currentUser) {
+        // Create new user via Admin API
+        const { data: newUser, error: signUpError } = await supabaseAdmin.auth.admin.createUser({
+          email,
+          password,
+          email_confirm: true,
+          user_metadata: {
+            tg_id: tgUser.id,
+            username: username
+          }
+        });
+
+        if (signUpError) throw signUpError;
+        currentUser = newUser.user;
+      }
+
+      // Return credentials so client can sign in properly
+      res.json({ 
+        success: true, 
+        email, 
+        password,
+        user: {
+          id: currentUser?.id,
+          tg_id: tgUser.id,
+          username
+        }
+      });
+    } catch (err: any) {
+      console.error("Sync Error:", err.message);
+      res.status(500).json({ error: "Database sync failed" });
+    }
   });
 
   // Secure Roll Mystery Box

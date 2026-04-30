@@ -34,79 +34,64 @@ function WalletAuthSync() {
           (window as any).Telegram.WebApp.expand();
         }
 
-        const tgUser = (window as any).Telegram?.WebApp?.initDataUnsafe?.user;
+        const initData = (window as any).Telegram?.WebApp?.initData;
         const walletAddress = wallet?.account.address;
         
-        if (!tgUser && !walletAddress) {
+        if (!initData && !walletAddress) {
           syncInProgress = false;
           return;
         }
-
-        // Primacy: Telegram > Wallet
-        const identityId = tgUser?.id ? `tg_${tgUser.id}` : (walletAddress ? `wallet_${walletAddress.toLowerCase()}` : null);
-        
-        if (!identityId) {
-          syncInProgress = false;
-          return;
-        }
-
-        const email = `${identityId}@tonbet.internal`;
-        const password = `secret_${identityId}`;
-        const username = tgUser?.username || tgUser?.first_name || (walletAddress ? `TonPlayer_${walletAddress.slice(-8)}` : 'Guest');
 
         // 1. Get current session
         const { data: { user: currentUser } } = await supabase.auth.getUser();
-        
-        // 2. If already logged in as the correct user
-        if (isMounted && currentUser && currentUser.email === email) {
-          // Sync wallet address to profile if needed
-          if (walletAddress) {
-            const { data: profile } = await supabase.from('profiles').select('wallet_address').eq('id', currentUser.id).single();
-            if (profile && !profile.wallet_address) {
-               await supabase.from('profiles').update({ wallet_address: walletAddress }).eq('id', currentUser.id);
+
+        // 2. Perform Secure Sync if Telegram is present
+        if (initData) {
+          try {
+            const syncRes = await fetch('/api/user/sync', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ initData })
+            });
+
+            if (!syncRes.ok) throw new Error("Sync failed");
+            const credentials = await syncRes.json();
+
+            // If not logged in as this user, sign in
+            if (!currentUser || currentUser.email !== credentials.email) {
+              await supabase.auth.signInWithPassword({ 
+                email: credentials.email, 
+                password: credentials.password 
+              });
             }
+
+            // Sync wallet if needed
+            if (walletAddress) {
+              await supabase.from('profiles').update({ wallet_address: walletAddress }).eq('tg_id', credentials.user.tg_id);
+            }
+
+            syncInProgress = false;
+            return;
+          } catch (err) {
+            console.error("Secure Sync Failed:", err);
           }
-          syncInProgress = false;
-          return;
         }
 
-        // 3. Authenticate
-        const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+        // 3. Fallback for Wallet-only users (Insecure, but manageable for pure web)
+        if (walletAddress && !initData) {
+          const identityId = `wallet_${walletAddress.toLowerCase()}`;
+          const email = `${identityId}@tonbet.internal`;
+          const password = `secret_${identityId}`;
 
-        if (signInError) {
-          // New User Registration
-          const urlParams = new URLSearchParams(window.location.search);
-          const rawRef = urlParams.get('ref') || urlParams.get('tgWebAppStartParam');
-          let referrerId = null;
-
-          if (rawRef) {
-            // Clean 'ref_' prefix if from TG start param
-            const cleanRef = rawRef.startsWith('ref_') ? rawRef.replace('ref_', '') : rawRef;
-            const { data: refProfile } = await supabase.from('profiles').select('id').eq('wallet_address', cleanRef).single();
-            if (!refProfile && cleanRef.length > 20) {
-              // Try match as ID if manual ref
-              const { data: refById } = await supabase.from('profiles').select('id').eq('referral_code', cleanRef).single();
-              if (refById) referrerId = refById.id;
-            } else if (refProfile) {
-              referrerId = refProfile.id;
-            }
+          if (isMounted && currentUser && currentUser.email === email) {
+            syncInProgress = false;
+            return;
           }
 
-          const { error: signUpError } = await supabase.auth.signUp({
-            email,
-            password,
-            options: {
-              data: {
-                wallet_address: walletAddress || null,
-                username: username,
-                referred_by: referrerId,
-                tg_id: tgUser?.id || null
-              }
-            }
-          });
-
-          if (!signUpError || signUpError.message.includes('already registered')) {
-            await supabase.auth.signInWithPassword({ email, password });
+          const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+          if (signInError) {
+             await supabase.auth.signUp({ email, password, options: { data: { wallet_address: walletAddress } } });
+             await supabase.auth.signInWithPassword({ email, password });
           }
         }
       } catch (e) {
