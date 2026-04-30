@@ -273,7 +273,7 @@ export default function Lottery() {
                   </div>
                   <button 
                     disabled={loading === room.id}
-                    onClick={() => buyTicket(room.id, room.tier === 1 ? 0.1 : room.tier === 2 ? 1 : 5)}
+                    onClick={() => buyTicket(room.id, room.entry_fee)}
                     className="bg-white text-black font-black px-8 py-3 rounded-xl text-xs active:scale-95 hover:bg-ton-blue hover:text-white transition-all disabled:opacity-50 flex items-center gap-2 uppercase tracking-widest shadow-lg shadow-white/5"
                   >
                     {loading === room.id ? 'PENDING...' : `BUY TICKET`}

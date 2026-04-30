@@ -15,7 +15,8 @@ import {
   ShieldCheck,
   AlertCircle,
   Info,
-  RefreshCw
+  RefreshCw,
+  Users
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { Link } from 'react-router-dom';
@@ -93,7 +94,7 @@ export default function Profile() {
       // Fetch Tickets
       const { data: ticketData } = await supabase
         .from('tickets')
-        .select('*, lottery_rooms(room_name)')
+        .select('*, lottery_rooms(name)')
         .eq('user_id', user.id)
         .order('created_at', { ascending: false })
         .limit(10);
@@ -101,8 +102,8 @@ export default function Profile() {
       if (ticketData) {
         setTickets(ticketData.map((t: any) => ({
           id: t.id,
-          room_name: t.lottery_rooms?.room_name || 'Unknown Room',
-          ticket_number: t.ticket_number,
+          room_name: t.lottery_rooms?.name || 'Unknown Room',
+          ticket_number: t.ticket_number || 0,
           created_at: t.created_at
         })));
       }
@@ -185,40 +186,52 @@ export default function Profile() {
     getInitialData();
   };
 
-  if (loading) {
+  if (loading && !user && wallet) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen gap-4">
-        <RefreshCw size={32} className="text-ton-blue animate-spin" />
-        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Loading profile data</p>
+      <div className="flex flex-col items-center justify-center min-h-screen gap-6 px-6 text-center">
+        <RefreshCw size={48} className="text-ton-blue animate-spin" />
+        <div>
+          <h2 className="text-2xl font-black mb-2 italic uppercase tracking-tight">Syncing Session</h2>
+          <p className="text-slate-400 text-sm max-w-[240px] leading-relaxed">
+            Securing your wallet connection with our servers...
+          </p>
+        </div>
+        <div className="bg-white/5 p-4 rounded-2xl border border-white/10 w-full max-w-[280px]">
+          <p className="text-[10px] font-mono text-slate-500 break-all">{wallet.account.address}</p>
+        </div>
       </div>
     );
   }
 
-  // If wallet is connected but user is not logged in to supabase
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen gap-4">
+        <RefreshCw size={32} className="text-ton-blue animate-spin" />
+        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 italic">Data loading...</p>
+      </div>
+    );
+  }
+
+  // If wallet is connected but user is still not synced after loading, we show a simplified "Wait" screen
+  // but we don't block the whole experience if possible. 
+  // However, most data requires user.id, so we must wait for sync.
   if (wallet && !user) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen px-6 text-center gap-6">
-        <RefreshCw size={48} className={cn("text-ton-blue", !syncTimeout && "animate-spin")} />
-        <div>
-          <h2 className="text-2xl font-black mb-2">{syncTimeout ? 'Sync Delayed' : 'Syncing Wallet'}</h2>
-          <p className="text-slate-400 text-sm">
-            {syncTimeout 
-              ? 'This is taking longer than expected. Please check your connection or try again.' 
-              : 'Please wait while we secure your session...'}
-          </p>
+        <div className="w-20 h-20 bg-ton-blue/10 border border-ton-blue/20 rounded-3xl flex items-center justify-center mb-2 animate-pulse">
+           <Wallet size={40} className="text-ton-blue" />
         </div>
-        
-        {syncTimeout && (
+        <div>
+          <h2 className="text-2xl font-black mb-2 italic">Sync Delay</h2>
+          <p className="text-slate-400 text-sm max-w-[240px] leading-relaxed mb-4">
+            Establishing a secure connection to your profile. This usually takes just a second.
+          </p>
           <button 
-            onClick={handleManualSync}
-            className="w-full max-w-[200px] bg-ton-blue text-white py-3 rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-ton-blue/80 transition-all shadow-lg shadow-ton-blue/20"
+            onClick={() => window.location.reload()}
+            className="text-[10px] font-black uppercase tracking-widest bg-white/5 border border-white/10 px-6 py-3 rounded-xl hover:bg-white/10 transition-all"
           >
-            Retry Sync
+            Refresh App
           </button>
-        )}
-
-        <div className="bg-white/5 p-4 rounded-2xl border border-white/10 w-full max-w-[280px]">
-          <p className="text-[10px] font-mono text-slate-500 break-all">{wallet.account.address}</p>
         </div>
       </div>
     );
@@ -244,7 +257,7 @@ export default function Profile() {
   return (
     <div className="px-6 pt-8 pb-32 max-w-md mx-auto min-h-screen">
       {/* Profile Header */}
-      <div className="bg-gradient-to-br from-[#1e222b] to-[#14161c] border border-white/10 rounded-[32px] p-6 mb-6 shadow-xl relative overflow-hidden group">
+      <div className="bg-gradient-to-br from-[#1e222b] to-[#14161c] border border-white/10 rounded-[32px] p-6 mb-4 shadow-xl relative overflow-hidden group">
         <div className="absolute -top-10 -right-10 w-32 h-32 bg-ton-blue/10 rounded-full blur-3xl group-hover:bg-ton-blue/20 transition-all duration-700" />
         
         <div className="flex items-center gap-4 mb-6 relative z-10">
@@ -264,24 +277,50 @@ export default function Profile() {
           </div>
         </div>
 
-        <div className="bg-white/5 backdrop-blur-sm rounded-2xl p-4 border border-white/5 relative z-10">
-          <div className="flex justify-between items-center mb-1">
-            <span className="text-[10px] text-slate-500 font-black uppercase tracking-wider">Available Balance</span>
-            <Wallet size={12} className="text-ton-blue" />
+        <div className="grid grid-cols-2 gap-3 mb-6 relative z-10">
+          <div className="bg-white/5 backdrop-blur-sm rounded-2xl p-4 border border-white/5">
+            <div className="flex justify-between items-center mb-1">
+              <span className="text-[9px] text-slate-500 font-black uppercase tracking-wider">Balance</span>
+              <Wallet size={10} className="text-ton-blue" />
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="text-lg font-black text-white">{(profile?.balance || 0).toFixed(2)}</span>
+              <span className="text-[8px] font-bold text-slate-500 mt-1">TON</span>
+            </div>
           </div>
-          <div className="flex items-end gap-2">
-            <span className="text-3xl font-black text-white">{(profile?.balance || 0).toFixed(2)}</span>
-            <span className="text-sm font-bold text-slate-500 mb-1">TON</span>
+          <div className="bg-white/5 backdrop-blur-sm rounded-2xl p-4 border border-white/5">
+            <div className="flex justify-between items-center mb-1">
+              <span className="text-[9px] text-slate-500 font-black uppercase tracking-wider">Ref Earned</span>
+              <Target size={10} className="text-amber-500" />
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="text-lg font-black text-amber-500">{(profile as any)?.total_earned_referral?.toFixed(2) || '0.00'}</span>
+              <span className="text-[8px] font-bold text-slate-500 mt-1">TON</span>
+            </div>
           </div>
-          
-          <button 
-            onClick={() => setShowWithdraw(!showWithdraw)}
-            className="w-full mt-4 bg-ton-blue text-white py-3 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-ton-blue/80 transition-all flex items-center justify-center gap-2 shadow-lg shadow-ton-blue/20"
-          >
-            Withdraw <ArrowUpRight size={14} />
-          </button>
         </div>
+
+        <button 
+          onClick={() => setShowWithdraw(!showWithdraw)}
+          className="w-full relative z-10 bg-ton-blue text-white py-3.5 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-ton-blue/80 transition-all flex items-center justify-center gap-2 shadow-lg shadow-ton-blue/20"
+        >
+          Withdraw Funds <ArrowUpRight size={14} />
+        </button>
       </div>
+
+      {/* Referral Quick Link */}
+      <Link to="/referral" className="flex items-center justify-between p-4 bg-[#1e222b] border border-white/5 rounded-2xl mb-6 group">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center text-amber-500 group-hover:scale-110 transition-transform">
+            <Users size={16} />
+          </div>
+          <div className="text-left">
+            <h4 className="text-[10px] font-black uppercase tracking-[0.1em] text-white">Invite Friends</h4>
+            <p className="text-[9px] text-slate-500 font-medium">Earn lifetime lifetime bonuses</p>
+          </div>
+        </div>
+        <ChevronRight size={14} className="text-slate-600 group-hover:text-amber-500 transition-colors" />
+      </Link>
 
       {/* Withdraw Form */}
       <AnimatePresence>
