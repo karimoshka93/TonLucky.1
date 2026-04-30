@@ -153,7 +153,10 @@ BEGIN
     new.id, 
     final_username,
     new.raw_user_meta_data->>'wallet_address',
-    (new.raw_user_meta_data->>'tg_id')::bigint,
+    CASE 
+      WHEN (new.raw_user_meta_data->>'tg_id') ~ '^[0-9]+$' THEN (new.raw_user_meta_data->>'tg_id')::bigint 
+      ELSE NULL 
+    END,
     substring(encode(gen_random_bytes(6), 'hex'), 1, 10),
     ref_id
   )
