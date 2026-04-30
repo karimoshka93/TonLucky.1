@@ -15,10 +15,35 @@ ALTER TABLE tickets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE mystery_box_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE withdrawals ENABLE ROW LEVEL SECURITY;
 
--- 1. PROFILES: View own only. No client updates allowed.
+-- 1. PROFILES: View own only. 
 CREATE POLICY "Profiles are viewable by owner" 
 ON profiles FOR SELECT 
 USING (auth.uid() = id);
+
+-- Allow users to update their own profile (with column protection trigger below)
+CREATE POLICY "Profiles are updatable by owner" 
+ON profiles FOR UPDATE
+USING (auth.uid() = id);
+
+-- PROTECTION TRIGGER (Critical: Prevents balance tampering)
+CREATE OR REPLACE FUNCTION public.protect_profile_sensitive_fields()
+RETURNS trigger AS $$
+BEGIN
+  IF auth.role() = 'authenticated' THEN
+    NEW.balance := OLD.balance;
+    NEW.referral_count := OLD.referral_count;
+    NEW.total_earned_referral := OLD.total_earned_referral;
+    NEW.created_at := OLD.created_at;
+    NEW.id := OLD.id;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS on_profile_update_protect ON profiles;
+CREATE TRIGGER on_profile_update_protect
+  BEFORE UPDATE ON profiles
+  FOR EACH ROW EXECUTE PROCEDURE public.protect_profile_sensitive_fields();
 
 -- 2. TICKETS: View own, insert own.
 CREATE POLICY "Tickets viewable by owner" 

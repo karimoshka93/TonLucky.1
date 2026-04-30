@@ -130,10 +130,14 @@ DECLARE
   ref_id UUID;
   final_username TEXT;
 BEGIN
-  -- Safely parse referral ID
+  -- Safely parse referral ID and verify it exists
   BEGIN
     IF (new.raw_user_meta_data->>'referred_by') IS NOT NULL AND (new.raw_user_meta_data->>'referred_by') != '' THEN
       ref_id := (new.raw_user_meta_data->>'referred_by')::uuid;
+      -- Verify the referrer exists to avoid FK violation
+      IF NOT EXISTS (SELECT 1 FROM public.profiles WHERE id = ref_id) THEN
+        ref_id := NULL;
+      END IF;
     ELSE
       ref_id := NULL;
     END IF;
