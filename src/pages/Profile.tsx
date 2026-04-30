@@ -68,57 +68,62 @@ export default function Profile() {
   const [withdrawStatus, setWithdrawStatus] = useState<{ type: 'success' | 'error', msg: string } | null>(null);
 
   const getInitialData = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    setUser(user);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      setUser(user);
 
-    if (user) {
-      // Fetch Profile
-      const { data: pData } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .single();
-      
-      if (pData) setProfile(pData);
+      if (user) {
+        // Fetch Profile
+        const { data: pData } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', user.id)
+          .single();
+        
+        if (pData) setProfile(pData);
 
-      // Fetch Transactions
-      const { data: tData } = await supabase
-        .from('transactions')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(10);
-      
-      if (tData) setTransactions(tData);
+        // Fetch Transactions
+        const { data: tData } = await supabase
+          .from('transactions')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(10);
+        
+        if (tData) setTransactions(tData);
 
-      // Fetch Tickets
-      const { data: ticketData } = await supabase
-        .from('tickets')
-        .select('*, lottery_rooms(name)')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(10);
-      
-      if (ticketData) {
-        setTickets(ticketData.map((t: any) => ({
-          id: t.id,
-          room_name: t.lottery_rooms?.name || 'Unknown Room',
-          ticket_number: t.ticket_number || 0,
-          created_at: t.created_at
-        })));
+        // Fetch Tickets
+        const { data: ticketData } = await supabase
+          .from('tickets')
+          .select('*, lottery_rooms(name)')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(10);
+        
+        if (ticketData) {
+          setTickets(ticketData.map((t: any) => ({
+            id: t.id,
+            room_name: t.lottery_rooms?.name || 'Unknown Room',
+            ticket_number: t.ticket_number || 0,
+            created_at: t.created_at
+          })));
+        }
+
+        // Fetch Box Logs
+        const { data: bData } = await supabase
+          .from('mystery_box_logs')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(10);
+        
+        if (bData) setBoxLogs(bData);
       }
-
-      // Fetch Box Logs
-      const { data: bData } = await supabase
-        .from('mystery_box_logs')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(10);
-      
-      if (bData) setBoxLogs(bData);
+    } catch (e) {
+      console.error('Data fetch error:', e);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   useEffect(() => {
@@ -189,15 +194,14 @@ export default function Profile() {
   if (loading && !user && wallet) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen gap-6 px-6 text-center">
-        <RefreshCw size={48} className="text-ton-blue animate-spin" />
+        <div className="w-20 h-20 rounded-3xl bg-ton-blue/10 border border-ton-blue/20 flex items-center justify-center animate-pulse">
+           <Wallet className="text-ton-blue" size={40} />
+        </div>
         <div>
           <h2 className="text-2xl font-black mb-2 italic uppercase tracking-tight">Syncing Session</h2>
           <p className="text-slate-400 text-sm max-w-[240px] leading-relaxed">
             Securing your wallet connection with our servers...
           </p>
-        </div>
-        <div className="bg-white/5 p-4 rounded-2xl border border-white/10 w-full max-w-[280px]">
-          <p className="text-[10px] font-mono text-slate-500 break-all">{wallet.account.address}</p>
         </div>
       </div>
     );
@@ -212,25 +216,23 @@ export default function Profile() {
     );
   }
 
-  // If wallet is connected but user is still not synced after loading, we show a simplified "Wait" screen
-  // but we don't block the whole experience if possible. 
-  // However, most data requires user.id, so we must wait for sync.
   if (wallet && !user) {
+    // If we're here, it means sync is really slow. We just reload once.
     return (
       <div className="flex flex-col items-center justify-center min-h-screen px-6 text-center gap-6">
-        <div className="w-20 h-20 bg-ton-blue/10 border border-ton-blue/20 rounded-3xl flex items-center justify-center mb-2 animate-pulse">
-           <Wallet size={40} className="text-ton-blue" />
+        <div className="w-20 h-20 bg-amber-500/10 border border-amber-500/20 rounded-3xl flex items-center justify-center mb-2 animate-bounce">
+           <AlertCircle size={40} className="text-amber-500" />
         </div>
         <div>
-          <h2 className="text-2xl font-black mb-2 italic">Sync Delay</h2>
+          <h2 className="text-2xl font-black mb-2 italic">Sync Error</h2>
           <p className="text-slate-400 text-sm max-w-[240px] leading-relaxed mb-4">
-            Establishing a secure connection to your profile. This usually takes just a second.
+            We couldn't connect to your profile. Please try refreshing or checking your wallet.
           </p>
           <button 
             onClick={() => window.location.reload()}
-            className="text-[10px] font-black uppercase tracking-widest bg-white/5 border border-white/10 px-6 py-3 rounded-xl hover:bg-white/10 transition-all"
+            className="text-[10px] font-black uppercase tracking-widest bg-white text-black px-8 py-4 rounded-2xl hover:bg-ton-blue hover:text-white transition-all shadow-xl shadow-white/10"
           >
-            Refresh App
+            Try Again
           </button>
         </div>
       </div>

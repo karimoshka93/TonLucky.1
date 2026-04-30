@@ -187,6 +187,17 @@ async function startServer() {
       appType: "spa",
     });
     app.use(vite.middlewares);
+    // Explicit catch-all for dev mode to prevent 404s on subpages
+    app.get("*", async (req, res, next) => {
+      const url = req.originalUrl;
+      try {
+        const template = await vite.transformIndexHtml(url, `<!DOCTYPE html><html><head></head><body><div id="root"></div></body></html>`);
+        res.status(200).set({ "Content-Type": "text/html" }).end(template);
+      } catch (e) {
+        vite.ssrFixStacktrace(e as Error);
+        next(e);
+      }
+    });
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));

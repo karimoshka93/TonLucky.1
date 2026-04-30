@@ -21,76 +21,66 @@ function WalletAuthSync() {
 
   useEffect(() => {
     let isMounted = true;
+    let syncInProgress = false;
 
     async function sync() {
-      if (wallet?.account.address) {
+      if (wallet?.account.address && !syncInProgress) {
+        syncInProgress = true;
         try {
-          // Normalize address to ensure consistency
           const address = wallet.account.address.toLowerCase();
           const email = `${address}@tonbet.internal`;
-          const password = `wallet_${address}`; // Use normalized address for password to avoid mismatch
-
-          console.log('Syncing wallet:', address);
+          const password = `wallet_${address}`;
 
           // Check current session
           const { data: { user: currentUser } } = await supabase.auth.getUser();
           if (isMounted && currentUser && currentUser.email === email) {
-            console.log('Already synced with Supabase');
+            syncInProgress = false;
             return;
           }
 
-          // Try sign in
-          const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+          // Force sign in
+          const { error: signInError } = await supabase.auth.signInWithPassword({
             email,
             password,
           });
 
           if (signInError) {
-            console.log('SignIn failed, attempting SignUp...', signInError.message);
-            
             const urlParams = new URLSearchParams(window.location.search);
             const referrerAddress = urlParams.get('ref') || urlParams.get('tgWebAppStartParam');
             let referrerId = null;
 
             if (referrerAddress) {
-              try {
-                const { data: refProfile } = await supabase
-                  .from('profiles')
-                  .select('id')
-                  .eq('wallet_address', referrerAddress)
-                  .single();
-                if (refProfile) referrerId = refProfile.id;
-              } catch (e) {
-                console.warn('Referrer lookup failed');
-              }
+              const { data: refProfile } = await supabase
+                .from('profiles')
+                .select('id')
+                .eq('wallet_address', referrerAddress)
+                .single();
+              if (refProfile) referrerId = refProfile.id;
             }
 
-            // Try sign up
-            const { error: signUpError } = await supabase.auth.signUp({
+            await supabase.auth.signUp({
               email,
               password,
               options: {
                 data: {
-                  wallet_address: wallet.account.address, // Store raw
+                  wallet_address: wallet.account.address,
                   username: `User_${address.slice(-4)}`,
                   referred_by: referrerId
                 }
               }
             });
-            
-            if (signUpError && signUpError.message.includes('already registered')) {
-               // Rare race condition, retry sign in once more
-               await supabase.auth.signInWithPassword({ email, password });
-            }
           }
-        } catch (globalError) {
-          console.error('Global Sync Error:', globalError);
+        } catch (e) {
+          console.error('Sync error:', e);
+        } finally {
+          syncInProgress = false;
         }
       }
     }
 
     sync();
-    return () => { isMounted = false; };
+    const interval = setInterval(sync, 5000); // Heartbeat sync
+    return () => { isMounted = false; clearInterval(interval); };
   }, [wallet]);
 
   return null;
