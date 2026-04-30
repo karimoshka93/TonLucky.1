@@ -166,6 +166,25 @@ export default function Profile() {
     }
   };
 
+  // Sync timeout to avoid getting stuck
+  const [syncTimeout, setSyncTimeout] = useState(false);
+
+  useEffect(() => {
+    let timer: any;
+    if (wallet && !user) {
+      timer = setTimeout(() => {
+        setSyncTimeout(true);
+      }, 10000); // 10 seconds
+    }
+    return () => clearTimeout(timer);
+  }, [wallet, user]);
+
+  const handleManualSync = () => {
+    setLoading(true);
+    setSyncTimeout(false);
+    getInitialData();
+  };
+
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen gap-4">
@@ -179,11 +198,25 @@ export default function Profile() {
   if (wallet && !user) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen px-6 text-center gap-6">
-        <RefreshCw size={48} className="text-ton-blue animate-spin" />
+        <RefreshCw size={48} className={cn("text-ton-blue", !syncTimeout && "animate-spin")} />
         <div>
-          <h2 className="text-2xl font-black mb-2">Syncing Wallet</h2>
-          <p className="text-slate-400 text-sm">Please wait while we secure your session...</p>
+          <h2 className="text-2xl font-black mb-2">{syncTimeout ? 'Sync Delayed' : 'Syncing Wallet'}</h2>
+          <p className="text-slate-400 text-sm">
+            {syncTimeout 
+              ? 'This is taking longer than expected. Please check your connection or try again.' 
+              : 'Please wait while we secure your session...'}
+          </p>
         </div>
+        
+        {syncTimeout && (
+          <button 
+            onClick={handleManualSync}
+            className="w-full max-w-[200px] bg-ton-blue text-white py-3 rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-ton-blue/80 transition-all shadow-lg shadow-ton-blue/20"
+          >
+            Retry Sync
+          </button>
+        )}
+
         <div className="bg-white/5 p-4 rounded-2xl border border-white/10 w-full max-w-[280px]">
           <p className="text-[10px] font-mono text-slate-500 break-all">{wallet.account.address}</p>
         </div>
